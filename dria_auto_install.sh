@@ -616,61 +616,6 @@ check_network() {
     return 0
 }
 
-# 主菜单功能
-main_menu() {
-    while true; do
-        clear
-        # 显示运行环境
-        if [ "$ENV_TYPE" = "wsl" ]; then
-            display_status "当前运行在Windows Subsystem for Linux (WSL)环境中" "info"
-        else
-            display_status "当前运行在原生Ubuntu环境中" "info"
-        fi
-        
-        # 显示代理状态
-        if [ ! -z "$http_proxy" ]; then
-            display_status "代理已设置: $http_proxy" "info"
-        fi
-        
-        # 尝试下载并显示 logo
-        if command -v curl &> /dev/null; then
-            curl -s --connect-timeout 5 https://raw.githubusercontent.com/fishzone24/dria/main/logo.sh | bash 2>/dev/null || echo "DRIA 节点管理工具"
-            sleep 1
-        else
-            echo "DRIA 节点管理工具"
-        fi
-        
-        echo -e "${MENU_COLOR}${BOLD}============================ Dria 节点管理工具 ============================${NORMAL}"
-        echo -e "${MENU_COLOR}请选择操作:${NORMAL}"
-        echo -e "${MENU_COLOR}1. 更新系统并安装依赖项${NORMAL}"
-        echo -e "${MENU_COLOR}2. 安装 Docker 环境${NORMAL}"
-        echo -e "${MENU_COLOR}3. 安装 Ollama${NORMAL}"
-        echo -e "${MENU_COLOR}4. 安装 Dria 计算节点${NORMAL}"
-        echo -e "${MENU_COLOR}5. Dria 节点管理${NORMAL}"
-        echo -e "${MENU_COLOR}6. 检查系统环境${NORMAL}"
-        echo -e "${MENU_COLOR}7. 检查网络连接${NORMAL}"
-        echo -e "${MENU_COLOR}8. 设置网络代理${NORMAL}"
-        echo -e "${MENU_COLOR}9. 清除网络代理${NORMAL}"
-        echo -e "${MENU_COLOR}0. 退出${NORMAL}"
-        read -p "请输入选项（0-9）: " OPTION
-
-        case $OPTION in
-            1) setup_prerequisites ;;
-            2) install_docker ;;
-            3) install_ollama ;;
-            4) install_dria_node ;;
-            5) manage_dria_node ;;
-            6) check_system_environment ;;
-            7) check_network ;;
-            8) setup_proxy ;;
-            9) clear_proxy ;;
-            0) exit 0 ;;
-            *) display_status "无效选项，请重试。" "error" ;;
-        esac
-        read -n 1 -s -r -p "按任意键返回主菜单..."
-    done
-}
-
 # 检查系统环境
 check_system_environment() {
     clear
@@ -739,6 +684,53 @@ check_system_environment() {
     read -n 1 -s -r -p "按任意键继续..."
 }
 
+# 初始化函数
+initialize() {
+    # 检查是否需要安装基本工具
+    if ! command -v curl &>/dev/null || ! command -v ping &>/dev/null || ! command -v wget &>/dev/null; then
+        display_status "安装基本工具..." "info"
+        apt update -y &>/dev/null
+        apt install -y curl wget iputils-ping &>/dev/null
+    fi
+    
+    # 为WSL环境执行特殊初始化
+    if [ "$ENV_TYPE" = "wsl" ]; then
+        display_status "执行WSL环境初始化..." "info"
+        
+        # 确保/etc/resolv.conf正确 - 不阻塞
+        if [ ! -f /etc/resolv.conf ] || ! grep -q "nameserver" /etc/resolv.conf; then
+            display_status "创建/修复DNS配置..." "info"
+            echo "nameserver 8.8.8.8" > /etc/resolv.conf
+        fi
+        
+        # 检查Docker服务可用性 - 不阻塞
+        if command -v docker &>/dev/null && ! timeout 2 docker info &>/dev/null; then
+            display_status "尝试启动Docker服务..." "info"
+            service docker start &>/dev/null || /etc/init.d/docker start &>/dev/null &
+        fi
+    fi
+}
+
+# 网络初始化 - 在后台进行
+init_network_check() {
+    # 在后台执行网络检查并将结果保存到临时文件
+    (
+        # 快速测试Google DNS，超时设为2秒
+        if timeout 2 ping -c 1 -W 2 8.8.8.8 &>/dev/null; then
+            echo "internet_ok" > /tmp/dria_network_status
+        else
+            echo "internet_error" > /tmp/dria_network_status
+        fi
+        
+        # 快速测试GitHub连接，超时设为3秒
+        if timeout 3 curl -s --connect-timeout 3 https://api.github.com &>/dev/null; then
+            echo "github_ok" > /tmp/dria_github_status
+        else
+            echo "github_error" > /tmp/dria_github_status
+        fi
+    ) &
+}
+
 # 显示脚本信息
 display_info() {
     clear
@@ -756,9 +748,13 @@ display_info() {
         echo -e "${INFO_COLOR}当前在原生Ubuntu环境中运行${NORMAL}"
     fi
     
-    # 执行简单的网络检查
-    if ! ping -c 1 -W 3 8.8.8.8 &>/dev/null; then
+    # 执行简单的网络检查 - 不阻塞
+    if [ -f /tmp/dria_network_status ] && [ "$(cat /tmp/dria_network_status)" = "internet_error" ]; then
         echo -e "${ERROR_COLOR}${BOLD}警告: 网络连接可能有问题，这可能会影响安装过程${NORMAL}"
+    fi
+    
+    if [ -f /tmp/dria_github_status ] && [ "$(cat /tmp/dria_github_status)" = "github_error" ]; then
+        echo -e "${ERROR_COLOR}${BOLD}警告: 无法连接到GitHub，请考虑设置网络代理${NORMAL}"
     fi
     
     echo -e "${INFO_COLOR}安装过程包括:${NORMAL}"
@@ -781,40 +777,75 @@ display_info() {
         echo -e "${WARNING_COLOR}2. 在WSL中Docker可能需要手动启动${NORMAL}"
         echo -e "${WARNING_COLOR}3. 如遇到问题，可尝试重启WSL或Windows系统${NORMAL}"
         echo -e "${WARNING_COLOR}4. 可在Windows PowerShell中执行 wsl --shutdown 后重新启动WSL${NORMAL}"
+        echo -e "${WARNING_COLOR}5. 请先设置网络代理以确保能够访问GitHub${NORMAL}"
     fi
     
     echo -e ""
     read -n 1 -s -r -p "按任意键继续..."
 }
 
-# 初始化函数
-initialize() {
-    # 检查是否需要安装基本工具
-    if ! command -v curl &>/dev/null || ! command -v ping &>/dev/null || ! command -v wget &>/dev/null; then
-        display_status "安装基本工具..." "info"
-        apt update -y &>/dev/null
-        apt install -y curl wget iputils-ping &>/dev/null
-    fi
-    
-    # 为WSL环境执行特殊初始化
-    if [ "$ENV_TYPE" = "wsl" ]; then
-        display_status "执行WSL环境初始化..." "info"
-        
-        # 确保/etc/resolv.conf正确
-        if [ ! -f /etc/resolv.conf ] || ! grep -q "nameserver" /etc/resolv.conf; then
-            display_status "创建/修复DNS配置..." "info"
-            echo "nameserver 8.8.8.8" > /etc/resolv.conf
+# 主菜单功能
+main_menu() {
+    while true; do
+        clear
+        # 显示运行环境
+        if [ "$ENV_TYPE" = "wsl" ]; then
+            display_status "当前运行在Windows Subsystem for Linux (WSL)环境中" "info"
+        else
+            display_status "当前运行在原生Ubuntu环境中" "info"
         fi
         
-        # 检查Docker服务可用性
-        if command -v docker &>/dev/null && ! docker info &>/dev/null; then
-            display_status "尝试启动Docker服务..." "info"
-            service docker start &>/dev/null || /etc/init.d/docker start &>/dev/null
+        # 显示代理状态
+        if [ ! -z "$http_proxy" ]; then
+            display_status "代理已设置: $http_proxy" "info"
         fi
-    fi
+        
+        # 显示网络状态
+        if [ -f /tmp/dria_github_status ] && [ "$(cat /tmp/dria_github_status)" = "github_error" ]; then
+            display_status "GitHub连接不可用，建议设置网络代理" "warning"
+        fi
+        
+        # 尝试下载并显示 logo，但设置超时避免卡住
+        if command -v curl &> /dev/null; then
+            curl -s --connect-timeout 3 --max-time 3 https://raw.githubusercontent.com/fishzone24/dria/main/logo.sh | bash 2>/dev/null || echo "DRIA 节点管理工具"
+            sleep 1
+        else
+            echo "DRIA 节点管理工具"
+        fi
+        
+        echo -e "${MENU_COLOR}${BOLD}============================ Dria 节点管理工具 ============================${NORMAL}"
+        echo -e "${MENU_COLOR}请选择操作:${NORMAL}"
+        echo -e "${MENU_COLOR}1. 更新系统并安装依赖项${NORMAL}"
+        echo -e "${MENU_COLOR}2. 安装 Docker 环境${NORMAL}"
+        echo -e "${MENU_COLOR}3. 安装 Ollama${NORMAL}"
+        echo -e "${MENU_COLOR}4. 安装 Dria 计算节点${NORMAL}"
+        echo -e "${MENU_COLOR}5. Dria 节点管理${NORMAL}"
+        echo -e "${MENU_COLOR}6. 检查系统环境${NORMAL}"
+        echo -e "${MENU_COLOR}7. 检查网络连接${NORMAL}"
+        echo -e "${MENU_COLOR}8. 设置网络代理${NORMAL}"
+        echo -e "${MENU_COLOR}9. 清除网络代理${NORMAL}"
+        echo -e "${MENU_COLOR}0. 退出${NORMAL}"
+        read -p "请输入选项（0-9）: " OPTION
+
+        case $OPTION in
+            1) setup_prerequisites ;;
+            2) install_docker ;;
+            3) install_ollama ;;
+            4) install_dria_node ;;
+            5) manage_dria_node ;;
+            6) check_system_environment ;;
+            7) check_network ;;
+            8) setup_proxy ;;
+            9) clear_proxy ;;
+            0) exit 0 ;;
+            *) display_status "无效选项，请重试。" "error" ;;
+        esac
+        read -n 1 -s -r -p "按任意键返回主菜单..."
+    done
 }
 
 # 执行脚本
-initialize
+initialize      # 快速初始化
+init_network_check  # 网络检测在后台进行
 display_info
 main_menu 
