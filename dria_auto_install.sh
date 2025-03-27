@@ -316,7 +316,164 @@ clear_proxy() {
     display_status "代理设置已清除" "info"
 }
 
-# WSL网络优化功能
+# 添加DNS修复功能
+fix_wsl_dns() {
+    display_status "WSL DNS修复工具" "info"
+    echo "检测到DNS解析问题，正在修复..."
+    
+    # 备份当前resolv.conf
+    cp /etc/resolv.conf /etc/resolv.conf.bak 2>/dev/null
+    
+    # 修复DNS配置
+    echo "nameserver 8.8.8.8" > /etc/resolv.conf
+    echo "nameserver 1.1.1.1" >> /etc/resolv.conf
+    
+    # 添加Dria节点到hosts文件
+    if ! grep -q "node1.dria.co" /etc/hosts; then
+        display_status "添加Dria节点IP映射到hosts文件" "info"
+        cat >> /etc/hosts << 'EOF'
+# Dria节点IP映射
+34.145.16.76 node1.dria.co
+34.42.109.93 node2.dria.co
+34.42.43.172 node3.dria.co
+35.200.247.78 node4.dria.co
+34.92.171.75 node5.dria.co
+EOF
+    fi
+    
+    # 创建DNS修复脚本，用于系统启动时自动修复
+    cat > /usr/local/bin/fix-dns.sh << 'EOF'
+#!/bin/bash
+echo "正在修复DNS配置..."
+echo "nameserver 8.8.8.8" > /etc/resolv.conf
+echo "nameserver 1.1.1.1" >> /etc/resolv.conf
+
+# 确保hosts文件包含Dria节点
+if ! grep -q "node1.dria.co" /etc/hosts; then
+    cat >> /etc/hosts << 'HOSTS'
+# Dria节点IP映射
+34.145.16.76 node1.dria.co
+34.42.109.93 node2.dria.co
+34.42.43.172 node3.dria.co
+35.200.247.78 node4.dria.co
+34.92.171.75 node5.dria.co
+HOSTS
+fi
+echo "DNS配置已更新!"
+EOF
+    chmod +x /usr/local/bin/fix-dns.sh
+    
+    # 添加到rc.local以便开机自动运行
+    if [ ! -f /etc/rc.local ]; then
+        echo '#!/bin/bash' > /etc/rc.local
+        chmod +x /etc/rc.local
+    fi
+    
+    if ! grep -q "fix-dns.sh" /etc/rc.local; then
+        echo "/usr/local/bin/fix-dns.sh" >> /etc/rc.local
+    fi
+    
+    # 测试DNS是否修复成功
+    display_status "测试DNS配置" "info"
+    if ping -c 1 -W 2 node1.dria.co &>/dev/null; then
+        display_status "DNS修复成功！可以正常解析node1.dria.co" "success"
+    else
+        display_status "DNS问题仍然存在，但已添加hosts映射" "warning"
+    fi
+    
+    return 0
+}
+
+# 添加直接IP连接工具
+create_direct_connect_tool() {
+    display_status "创建直接IP连接工具" "info"
+    
+    # 创建使用IP直接连接的启动命令
+    cat > /usr/local/bin/dria-direct << 'EOF'
+#!/bin/bash
+echo "使用IP地址直接连接启动Dria节点..."
+echo "这种方式可以绕过DNS解析问题"
+
+# 先运行DNS修复脚本
+if [ -f /usr/local/bin/fix-dns.sh ]; then
+    /usr/local/bin/fix-dns.sh
+fi
+
+# 使用IP地址直接连接引导节点
+dkn-compute-launcher start -c "$HOME/.dria/network_config.json" --bootstrap "/ip4/34.145.16.76/tcp/4001/p2p/16Uiu2HAmCj9DuTQgzepxfKP1byDZoQbfkh4ZoQGihHEL1fuof3FJ,/ip4/34.42.109.93/tcp/4001/p2p/16Uiu2HAm9fQCDYwmkDCNtb5XZC5p8dUcHpvN9JMPeA9wJMndRPMw" $@
+EOF
+    chmod +x /usr/local/bin/dria-direct
+    
+    # 创建"超级修复"工具，一键解决所有问题
+    cat > /usr/local/bin/dria-superfix << 'EOF'
+#!/bin/bash
+echo "====== Dria超级修复工具 ======"
+echo "这个工具会尝试修复所有常见的连接问题"
+
+# 停止当前节点
+echo "1. 停止当前节点..."
+systemctl stop dria-node
+
+# 修复DNS
+echo "2. 修复DNS配置..."
+if [ -f /usr/local/bin/fix-dns.sh ]; then
+    /usr/local/bin/fix-dns.sh
+fi
+
+# 重置Docker网络
+echo "3. 重置Docker网络..."
+docker network prune -f
+systemctl restart docker
+sleep 2
+
+# 修改配置文件使用IP地址
+echo "4. 优化网络配置..."
+cat > "$HOME/.dria/network_config.json" << 'CONFIG'
+{
+  "libp2p": {
+    "listen_addresses": [
+      "/ip4/0.0.0.0/tcp/4001",
+      "/ip4/0.0.0.0/udp/4001/quic-v1"
+    ],
+    "external_addresses": [],
+    "bootstrap_peers": [
+      "/ip4/34.145.16.76/tcp/4001/p2p/16Uiu2HAmCj9DuTQgzepxfKP1byDZoQbfkh4ZoQGihHEL1fuof3FJ",
+      "/ip4/34.42.109.93/tcp/4001/p2p/16Uiu2HAm9fQCDYwmkDCNtb5XZC5p8dUcHpvN9JMPeA9wJMndRPMw",
+      "/ip4/34.42.43.172/tcp/4001/p2p/16Uiu2HAmVg8DxJ2MwAwQwA6Fj8fgbYBRqsTu3KAaWhq7Z7eMAKBL",
+      "/ip4/35.200.247.78/tcp/4001/p2p/16Uiu2HAmAkVoCpUHyZaXSddzByWMvYyR7ekCDJsM19mYHfMebYQQ",
+      "/ip4/34.92.171.75/tcp/4001/p2p/16Uiu2HAm1xBHVUCGjyiz8iakVoDR1qjj3bJT2ZYbPLyVTHX1pxKF"
+    ],
+    "connection_idle_timeout": 300,
+    "enable_relay": true,
+    "relay_discovery": true,
+    "direct_connection_timeout_ms": 20000,
+    "relay_connection_timeout_ms": 60000,
+    "external_multiaddrs": [
+      "/ip4/$(hostname -I | awk '{print $1}')/tcp/4001",
+      "/ip4/$(hostname -I | awk '{print $1}')/udp/4001/quic-v1"
+    ]
+  }
+}
+CONFIG
+
+# 以增强模式启动
+echo "5. 以增强模式启动节点..."
+echo "   启动中，请等待..."
+DKN_LOG=debug dkn-compute-launcher start -c "$HOME/.dria/network_config.json" $@
+
+# 注意：此脚本会一直运行，直到用户按Ctrl+C停止
+EOF
+    chmod +x /usr/local/bin/dria-superfix
+    
+    display_status "直接连接工具创建成功" "success"
+    echo "现在您可以使用以下命令:"
+    echo "1. dria-direct - 使用IP地址直接连接启动"
+    echo "2. dria-superfix - 一键式超级修复并启动"
+    
+    return 0
+}
+
+# 修改configure_wsl_network函数，增加DNS修复和直接连接工具
 configure_wsl_network() {
     display_status "WSL网络优化工具" "info"
     echo "此功能将配置Windows主机上的端口转发，使外部网络能够访问WSL中的Dria节点。"
@@ -326,6 +483,12 @@ configure_wsl_network() {
     if [ "$ENV_TYPE" != "wsl" ]; then
         display_status "此功能只能在WSL环境中使用" "error"
         return 1
+    fi
+    
+    # 先测试DNS解析
+    if ! ping -c 1 -W 2 node1.dria.co &>/dev/null; then
+        display_status "检测到DNS解析问题" "warning"
+        fix_wsl_dns
     fi
     
     # 获取WSL的IP地址
@@ -474,7 +637,7 @@ EOF
     # 配置Dria网络
     mkdir -p "$HOME/.dria" 2>/dev/null
     
-    # 创建优化的网络配置
+    # 创建优化的网络配置，使用IP地址替代DNS
     cat > "$HOME/.dria/network_config.json" << EOF
 {
   "libp2p": {
@@ -484,17 +647,17 @@ EOF
     ],
     "external_addresses": [],
     "bootstrap_peers": [
-      "/dns4/node1.dria.co/tcp/4001/p2p/16Uiu2HAmCj9DuTQgzepxfKP1byDZoQbfkh4ZoQGihHEL1fuof3FJ",
-      "/dns4/node2.dria.co/tcp/4001/p2p/16Uiu2HAm9fQCDYwmkDCNtb5XZC5p8dUcHpvN9JMPeA9wJMndRPMw",
-      "/dns4/node3.dria.co/tcp/4001/p2p/16Uiu2HAmVg8DxJ2MwAwQwA6Fj8fgbYBRqsTu3KAaWhq7Z7eMAKBL",
-      "/dns4/node4.dria.co/tcp/4001/p2p/16Uiu2HAmAkVoCpUHyZaXSddzByWMvYyR7ekCDJsM19mYHfMebYQQ",
-      "/dns4/node5.dria.co/tcp/4001/p2p/16Uiu2HAm1xBHVUCGjyiz8iakVoDR1qjj3bJT2ZYbPLyVTHX1pxKF"
+      "/ip4/34.145.16.76/tcp/4001/p2p/16Uiu2HAmCj9DuTQgzepxfKP1byDZoQbfkh4ZoQGihHEL1fuof3FJ",
+      "/ip4/34.42.109.93/tcp/4001/p2p/16Uiu2HAm9fQCDYwmkDCNtb5XZC5p8dUcHpvN9JMPeA9wJMndRPMw",
+      "/ip4/34.42.43.172/tcp/4001/p2p/16Uiu2HAmVg8DxJ2MwAwQwA6Fj8fgbYBRqsTu3KAaWhq7Z7eMAKBL",
+      "/ip4/35.200.247.78/tcp/4001/p2p/16Uiu2HAmAkVoCpUHyZaXSddzByWMvYyR7ekCDJsM19mYHfMebYQQ",
+      "/ip4/34.92.171.75/tcp/4001/p2p/16Uiu2HAm1xBHVUCGjyiz8iakVoDR1qjj3bJT2ZYbPLyVTHX1pxKF"
     ],
-    "connection_idle_timeout": 120,
+    "connection_idle_timeout": 300,
     "enable_relay": true,
     "relay_discovery": true,
-    "direct_connection_timeout_ms": 10000,
-    "relay_connection_timeout_ms": 30000,
+    "direct_connection_timeout_ms": 20000,
+    "relay_connection_timeout_ms": 60000,
     "external_multiaddrs": [
       "/ip4/$WSL_IP/tcp/4001",
       "/ip4/$WSL_IP/udp/4001/quic-v1"
@@ -505,9 +668,29 @@ EOF
     
     display_status "已创建优化的网络配置文件: $HOME/.dria/network_config.json" "success"
     
-    # 创建优化的启动脚本
+    # 创建优化的启动脚本，增加DNS自动修复
     cat > "$HOME/.dria/start_with_optimized_network.sh" << 'EOF'
 #!/bin/bash
+
+# 修复DNS问题
+if ! ping -c 1 -W 2 node1.dria.co &>/dev/null; then
+    echo "检测到DNS问题，正在修复..."
+    echo "nameserver 8.8.8.8" > /etc/resolv.conf
+    echo "nameserver 1.1.1.1" >> /etc/resolv.conf
+    
+    # 确保hosts文件中包含节点IP映射
+    if ! grep -q "node1.dria.co" /etc/hosts; then
+        echo "添加节点IP映射到hosts文件..."
+        cat >> /etc/hosts << 'HOSTS'
+# Dria节点IP映射
+34.145.16.76 node1.dria.co
+34.42.109.93 node2.dria.co
+34.42.43.172 node3.dria.co
+35.200.247.78 node4.dria.co
+34.92.171.75 node5.dria.co
+HOSTS
+    fi
+fi
 
 # 配置WSL网络环境
 WIN_HOST_IP=$(cat /tmp/win_host_ip 2>/dev/null || ip route | grep default | awk '{print $3}')
@@ -538,6 +721,7 @@ fi
 
 # 使用优化配置启动Dria节点
 echo "使用优化配置启动Dria节点..."
+echo "使用参数: $@"
 dkn-compute-launcher start -c "$HOME/.dria/network_config.json" $@
 EOF
     
@@ -589,6 +773,9 @@ echo "Dria节点网络已重置"
 EOF
     chmod +x /usr/local/bin/dria-reset
     
+    # 创建直接连接工具
+    create_direct_connect_tool
+    
     display_status "WSL网络优化配置完成" "success"
     echo ""
     echo "您可以通过以下命令管理Dria节点:"
@@ -598,7 +785,9 @@ EOF
     echo "4. 检查状态: systemctl status dria-node"
     echo "5. 重置网络: dria-reset"
     echo "6. 手动启动: dria-optimized"
-    echo "7. 带网络重置启动: dria-optimized --reset-docker"
+    echo "7. 重置启动: dria-optimized --reset-docker"
+    echo "8. IP直连启动: dria-direct"
+    echo "9. 超级修复工具: dria-superfix"
     echo ""
     display_status "每次重启Windows或WSL后，请重新运行此功能以更新端口转发" "warning"
     echo "Windows主机IP可能会在重启后发生变化" 
