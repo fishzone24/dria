@@ -399,8 +399,44 @@ if [ -f /usr/local/bin/fix-dns.sh ]; then
     /usr/local/bin/fix-dns.sh
 fi
 
+# 创建优化的网络配置
+mkdir -p "$HOME/.dria" 2>/dev/null
+cat > "$HOME/.dria/direct_network_config.json" << 'CONFIG'
+{
+  "libp2p": {
+    "listen_addresses": [
+      "/ip4/0.0.0.0/tcp/4001",
+      "/ip4/0.0.0.0/udp/4001/quic-v1"
+    ],
+    "external_addresses": [],
+    "bootstrap_peers": [
+      "/ip4/34.145.16.76/tcp/4001/p2p/16Uiu2HAmCj9DuTQgzepxfKP1byDZoQbfkh4ZoQGihHEL1fuof3FJ",
+      "/ip4/34.42.109.93/tcp/4001/p2p/16Uiu2HAm9fQCDYwmkDCNtb5XZC5p8dUcHpvN9JMPeA9wJMndRPMw",
+      "/ip4/34.42.43.172/tcp/4001/p2p/16Uiu2HAmVg8DxJ2MwAwQwA6Fj8fgbYBRqsTu3KAaWhq7Z7eMAKBL",
+      "/ip4/35.200.247.78/tcp/4001/p2p/16Uiu2HAmAkVoCpUHyZaXSddzByWMvYyR7ekCDJsM19mYHfMebYQQ",
+      "/ip4/34.92.171.75/tcp/4001/p2p/16Uiu2HAm1xBHVUCGjyiz8iakVoDR1qjj3bJT2ZYbPLyVTHX1pxKF"
+    ],
+    "connection_idle_timeout": 300,
+    "enable_relay": true,
+    "relay_discovery": true,
+    "direct_connection_timeout_ms": 20000,
+    "relay_connection_timeout_ms": 60000,
+    "external_multiaddrs": [
+      "/ip4/$(hostname -I | awk '{print $1}')/tcp/4001",
+      "/ip4/$(hostname -I | awk '{print $1}')/udp/4001/quic-v1"
+    ]
+  }
+}
+CONFIG
+
+# 创建或更新settings.json以使用我们的配置
+CONFIG_PATH="$HOME/.dria/direct_network_config.json"
+echo "{\"network-config\": \"$CONFIG_PATH\"}" > "$HOME/.dria/settings.json"
+
 # 使用IP地址直接连接引导节点
-dkn-compute-launcher start -c "$HOME/.dria/network_config.json" --bootstrap "/ip4/34.145.16.76/tcp/4001/p2p/16Uiu2HAmCj9DuTQgzepxfKP1byDZoQbfkh4ZoQGihHEL1fuof3FJ,/ip4/34.42.109.93/tcp/4001/p2p/16Uiu2HAm9fQCDYwmkDCNtb5XZC5p8dUcHpvN9JMPeA9wJMndRPMw" $@
+echo "启动Dria节点..."
+export DKN_LOG=debug
+dkn-compute-launcher start
 EOF
     chmod +x /usr/local/bin/dria-direct
     
@@ -428,6 +464,7 @@ sleep 2
 
 # 修改配置文件使用IP地址
 echo "4. 优化网络配置..."
+mkdir -p "$HOME/.dria" 2>/dev/null
 cat > "$HOME/.dria/network_config.json" << 'CONFIG'
 {
   "libp2p": {
@@ -456,10 +493,16 @@ cat > "$HOME/.dria/network_config.json" << 'CONFIG'
 }
 CONFIG
 
+# 创建或更新settings.json以使用我们的配置
+mkdir -p "$HOME/.dria" 2>/dev/null
+CONFIG_PATH="$HOME/.dria/network_config.json"
+echo "{\"network-config\": \"$CONFIG_PATH\"}" > "$HOME/.dria/settings.json"
+
 # 以增强模式启动
 echo "5. 以增强模式启动节点..."
 echo "   启动中，请等待..."
-DKN_LOG=debug dkn-compute-launcher start -c "$HOME/.dria/network_config.json" $@
+export DKN_LOG=debug
+dkn-compute-launcher start
 
 # 注意：此脚本会一直运行，直到用户按Ctrl+C停止
 EOF
@@ -719,10 +762,46 @@ if [ "$1" == "--reset-docker" ]; then
     sleep 2
 fi
 
+# 创建网络配置文件
+WSL_IP=$(hostname -I | awk '{print $1}')
+mkdir -p "$HOME/.dria" 2>/dev/null
+cat > "$HOME/.dria/optimized_network_config.json" << CONFIG
+{
+  "libp2p": {
+    "listen_addresses": [
+      "/ip4/0.0.0.0/tcp/4001",
+      "/ip4/0.0.0.0/udp/4001/quic-v1"
+    ],
+    "external_addresses": [],
+    "bootstrap_peers": [
+      "/ip4/34.145.16.76/tcp/4001/p2p/16Uiu2HAmCj9DuTQgzepxfKP1byDZoQbfkh4ZoQGihHEL1fuof3FJ",
+      "/ip4/34.42.109.93/tcp/4001/p2p/16Uiu2HAm9fQCDYwmkDCNtb5XZC5p8dUcHpvN9JMPeA9wJMndRPMw",
+      "/ip4/34.42.43.172/tcp/4001/p2p/16Uiu2HAmVg8DxJ2MwAwQwA6Fj8fgbYBRqsTu3KAaWhq7Z7eMAKBL",
+      "/ip4/35.200.247.78/tcp/4001/p2p/16Uiu2HAmAkVoCpUHyZaXSddzByWMvYyR7ekCDJsM19mYHfMebYQQ",
+      "/ip4/34.92.171.75/tcp/4001/p2p/16Uiu2HAm1xBHVUCGjyiz8iakVoDR1qjj3bJT2ZYbPLyVTHX1pxKF"
+    ],
+    "connection_idle_timeout": 300,
+    "enable_relay": true,
+    "relay_discovery": true,
+    "direct_connection_timeout_ms": 20000,
+    "relay_connection_timeout_ms": 60000,
+    "external_multiaddrs": [
+      "/ip4/$WSL_IP/tcp/4001",
+      "/ip4/$WSL_IP/udp/4001/quic-v1"
+    ]
+  }
+}
+CONFIG
+
+# 创建或更新settings.json以使用我们的配置
+CONFIG_PATH="$HOME/.dria/optimized_network_config.json"
+echo "{\"network-config\": \"$CONFIG_PATH\"}" > "$HOME/.dria/settings.json"
+
 # 使用优化配置启动Dria节点
 echo "使用优化配置启动Dria节点..."
 echo "使用参数: $@"
-dkn-compute-launcher start -c "$HOME/.dria/network_config.json" $@
+export DKN_LOG=debug
+dkn-compute-launcher start
 EOF
     
     chmod +x "$HOME/.dria/start_with_optimized_network.sh"
