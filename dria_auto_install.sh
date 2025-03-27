@@ -1482,5 +1482,4 @@ main_menu() {
 initialize      # 快速初始化
 init_network_check  # 网络检测在后台进行
 display_info
-main_menu 
-main_menu 
+main_menu
