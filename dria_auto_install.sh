@@ -588,18 +588,24 @@ manage_dria_node() {
 
 # 检查网络连接
 check_network() {
+    # 清屏以确保显示完整信息
+    clear
     display_status "检查网络连接..." "info"
     
+    # 显示脚本执行过程中的每一条命令
+    set -v
+    
     # 测试基本网络连接
+    echo -e "${BOLD}${INFO_COLOR}基础网络连接测试:${NORMAL}"
     if ! ping -c 1 -W 3 8.8.8.8 &>/dev/null; then
         display_status "无法连接到互联网，请检查网络设置" "error"
         
         # 显示网络接口信息帮助诊断
-        echo -e "\n网络接口信息:"
+        echo -e "\n${BOLD}${INFO_COLOR}网络接口信息:${NORMAL}"
         ip addr show
         
         # 检查默认路由
-        echo -e "\n路由信息:"
+        echo -e "\n${BOLD}${INFO_COLOR}路由信息:${NORMAL}"
         ip route
         return 1
     else
@@ -607,24 +613,31 @@ check_network() {
     fi
     
     # 测试DNS解析详情
-    echo -e "\nDNS解析测试:"
+    echo -e "\n${BOLD}${INFO_COLOR}DNS解析测试 - 开始:${NORMAL}"
     
-    # 检查resolv.conf文件
-    echo -e "\n当前DNS配置(/etc/resolv.conf):"
+    # 强制显示DNS配置
+    echo -e "\n${BOLD}${INFO_COLOR}当前DNS配置(/etc/resolv.conf):${NORMAL}"
     if [ -f /etc/resolv.conf ]; then
         cat /etc/resolv.conf
     else
-        echo "文件不存在！"
+        echo "文件不存在！正在创建基本DNS配置..."
+        echo "nameserver 8.8.8.8" > /etc/resolv.conf
+        echo "nameserver 1.1.1.1" >> /etc/resolv.conf
+        cat /etc/resolv.conf
     fi
     
-    # 验证DNS服务器是否可用
+    # 验证DNS服务器是否可用并显示结果
+    echo -e "\n${BOLD}${INFO_COLOR}检查DNS服务器配置:${NORMAL}"
     dns_servers=$(grep nameserver /etc/resolv.conf | awk '{print $2}')
+    echo "已配置的DNS服务器: $dns_servers"
+    
     if [ -z "$dns_servers" ]; then
         display_status "没有配置DNS服务器，尝试添加公共DNS" "warning"
         
         # 备份当前文件
         if [ -f /etc/resolv.conf ]; then
             cp /etc/resolv.conf /etc/resolv.conf.bak
+            echo "已备份原始DNS配置"
         fi
         
         # 添加Google和Cloudflare DNS
@@ -633,11 +646,12 @@ check_network() {
         display_status "已添加公共DNS服务器(8.8.8.8和1.1.1.1)" "info"
         
         dns_servers="8.8.8.8 1.1.1.1"
+        echo "新配置的DNS服务器: $dns_servers"
     fi
     
     # 测试每个DNS服务器
     for dns in $dns_servers; do
-        echo -e "\n测试DNS服务器 $dns:"
+        echo -e "\n${BOLD}${INFO_COLOR}测试DNS服务器 $dns:${NORMAL}"
         if ping -c 1 -W 2 $dns &>/dev/null; then
             echo "✅ DNS服务器 $dns 可访问"
         else
@@ -646,30 +660,25 @@ check_network() {
     done
     
     # 实际DNS查询测试
-    echo -e "\n执行DNS解析测试:"
-    if command -v dig &>/dev/null; then
-        # 使用dig进行详细测试
-        echo "使用dig测试github.com解析:"
-        dig github.com +short
-        dig_status=$?
-    elif command -v nslookup &>/dev/null; then
-        # 使用nslookup测试
-        echo "使用nslookup测试github.com解析:"
-        nslookup github.com
-        nslookup_status=$?
+    echo -e "\n${BOLD}${INFO_COLOR}执行DNS解析测试:${NORMAL}"
+    
+    # 确保必要的DNS工具已安装
+    if ! command -v host &>/dev/null || ! command -v dig &>/dev/null; then
+        display_status "安装DNS诊断工具..." "info"
+        apt update -y
+        apt install -y dnsutils
+        echo "DNS工具安装完成"
     fi
     
-    if ! command -v dig &>/dev/null && ! command -v nslookup &>/dev/null; then
-        display_status "安装DNS诊断工具..." "info"
-        apt update -y &>/dev/null
-        apt install -y dnsutils &>/dev/null
-        
-        if command -v dig &>/dev/null; then
-            echo "使用dig测试github.com解析:"
-            dig github.com +short
-            dig_status=$?
-        fi
-    fi
+    # 使用多种工具测试DNS解析
+    echo -e "\n${BOLD}${INFO_COLOR}使用host命令测试github.com解析:${NORMAL}"
+    host github.com || echo "host命令测试失败"
+    
+    echo -e "\n${BOLD}${INFO_COLOR}使用dig命令测试github.com解析:${NORMAL}"
+    dig github.com +short || echo "dig命令测试失败"
+    
+    echo -e "\n${BOLD}${INFO_COLOR}使用nslookup命令测试github.com解析:${NORMAL}"
+    nslookup github.com || echo "nslookup命令测试失败"
     
     # 检查DNS解析状态
     if ! host github.com &>/dev/null; then
@@ -682,19 +691,46 @@ check_network() {
             # 检查是否存在Windows主机IP
             win_host=$(ip route | grep default | awk '{print $3}')
             if [ ! -z "$win_host" ]; then
+                echo -e "\n${BOLD}${INFO_COLOR}使用Windows主机IP($win_host)作为首选DNS服务器${NORMAL}"
                 echo "nameserver $win_host" > /etc/resolv.conf
                 echo "nameserver 8.8.8.8" >> /etc/resolv.conf
                 echo "nameserver 1.1.1.1" >> /etc/resolv.conf
-                display_status "已设置WSL DNS，使用Windows主机($win_host)作为DNS服务器" "info"
+                
+                echo -e "\n${BOLD}${INFO_COLOR}新的DNS配置:${NORMAL}"
+                cat /etc/resolv.conf
                 
                 # 重新测试DNS解析
-                if host github.com &>/dev/null; then
+                echo -e "\n${BOLD}${INFO_COLOR}重新测试DNS解析:${NORMAL}"
+                if host github.com; then
                     display_status "DNS解析问题已修复" "success"
                 else
                     display_status "DNS问题仍然存在" "error"
+                    
+                    # 尝试另一种修复方法
+                    echo -e "\n${BOLD}${INFO_COLOR}尝试使用备用DNS修复方法...${NORMAL}"
+                    echo "nameserver 114.114.114.114" > /etc/resolv.conf  # 中国大陆常用DNS
+                    echo "nameserver 223.5.5.5" >> /etc/resolv.conf       # 阿里DNS
+                    
+                    echo -e "\n${BOLD}${INFO_COLOR}使用中国大陆DNS的新配置:${NORMAL}"
+                    cat /etc/resolv.conf
+                    
+                    # 再次测试
+                    echo -e "\n${BOLD}${INFO_COLOR}使用中国大陆DNS重新测试:${NORMAL}"
+                    host github.com || echo "DNS解析仍然失败"
                 fi
             else
                 display_status "无法获取Windows主机IP" "error"
+                
+                # 后备方案：使用公共DNS
+                echo "nameserver 8.8.8.8" > /etc/resolv.conf
+                echo "nameserver 1.1.1.1" >> /etc/resolv.conf
+                
+                echo -e "\n${BOLD}${INFO_COLOR}使用公共DNS的新配置:${NORMAL}"
+                cat /etc/resolv.conf
+                
+                # 测试解析
+                echo -e "\n${BOLD}${INFO_COLOR}使用公共DNS测试解析:${NORMAL}"
+                host github.com || echo "解析测试失败"
             fi
         else
             # 常规Ubuntu修复
@@ -707,6 +743,12 @@ check_network() {
                 display_status "DNS解析问题已修复" "success"
             else
                 display_status "DNS问题仍然存在，请手动检查网络环境" "error"
+                
+                # 尝试中国大陆DNS
+                echo "nameserver 114.114.114.114" > /etc/resolv.conf
+                echo "nameserver 223.5.5.5" >> /etc/resolv.conf
+                echo -e "\n${BOLD}${INFO_COLOR}使用中国大陆DNS重新测试:${NORMAL}"
+                host github.com || echo "DNS解析仍然失败"
             fi
         fi
     else
@@ -714,17 +756,21 @@ check_network() {
     fi
     
     # 测试访问GitHub
-    echo -e "\nGitHub连接测试:"
-    if curl -s --connect-timeout 5 https://api.github.com &>/dev/null; then
+    echo -e "\n${BOLD}${INFO_COLOR}GitHub连接测试:${NORMAL}"
+    if curl -v --connect-timeout 5 https://api.github.com 2>&1 | grep -q "Connected to"; then
         display_status "GitHub API访问正常" "success"
     else
         display_status "无法访问GitHub API，可能需要设置代理" "warning"
         
+        # 显示详细的连接错误
+        echo -e "\n${BOLD}${INFO_COLOR}GitHub连接详细信息:${NORMAL}"
+        curl -v --connect-timeout 5 https://api.github.com 2>&1 | grep -E "Failed|Error|Couldn't|Connected" || echo "未能获取详细错误信息"
+        
         # 显示代理设置状态
         if [ ! -z "$http_proxy" ]; then
-            echo "当前代理设置: $http_proxy"
+            echo -e "\n${BOLD}${INFO_COLOR}当前代理设置:${NORMAL} $http_proxy"
         else
-            echo "未设置HTTP代理"
+            echo -e "\n${BOLD}${INFO_COLOR}未设置HTTP代理${NORMAL}"
         fi
         
         # 如果在WSL环境中，提示设置代理
@@ -739,12 +785,19 @@ check_network() {
     fi
     
     # 测试访问Dria网站
-    echo -e "\nDria网站连接测试:"
-    if curl -s --connect-timeout 5 https://dria.co &>/dev/null; then
+    echo -e "\n${BOLD}${INFO_COLOR}Dria网站连接测试:${NORMAL}"
+    if curl -v --connect-timeout 5 https://dria.co 2>&1 | grep -q "Connected to"; then
         display_status "Dria官方网站访问正常" "success"
     else
         display_status "无法访问Dria官方网站，可能影响安装过程" "warning"
+        
+        # 显示详细的连接错误
+        echo -e "\n${BOLD}${INFO_COLOR}Dria网站连接详细信息:${NORMAL}"
+        curl -v --connect-timeout 5 https://dria.co 2>&1 | grep -E "Failed|Error|Couldn't|Connected" || echo "未能获取详细错误信息"
     fi
+    
+    # 恢复脚本执行模式
+    set +v
     
     display_status "网络连接检查完成" "success"
     return 0
