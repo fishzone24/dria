@@ -205,6 +205,117 @@ install_ollama() {
     fi
 }
 
+# 代理设置功能
+setup_proxy() {
+    display_status "设置网络代理..." "info"
+    
+    # 检查是否已经设置了代理
+    if [ ! -z "$http_proxy" ] || [ ! -z "$https_proxy" ]; then
+        display_status "检测到已存在的代理设置:" "info"
+        echo "HTTP_PROXY=$http_proxy"
+        echo "HTTPS_PROXY=$https_proxy"
+        echo "ALL_PROXY=$all_proxy"
+        
+        read -p "是否保留当前代理设置？(y/n): " keep_proxy
+        if [[ $keep_proxy == "y" || $keep_proxy == "Y" ]]; then
+            display_status "保留当前代理设置" "success"
+            return 0
+        fi
+    fi
+    
+    # 在WSL环境中尝试使用Windows宿主机的代理
+    if [ "$ENV_TYPE" = "wsl" ]; then
+        display_status "在WSL环境中尝试使用Windows主机代理..." "info"
+        
+        # 获取WSL宿主机IP地址
+        WIN_HOST_IP=$(ip route | grep default | awk '{print $3}')
+        
+        if [ -z "$WIN_HOST_IP" ]; then
+            display_status "无法获取Windows主机IP，将使用127.0.0.1" "warning"
+            WIN_HOST_IP="127.0.0.1"
+        fi
+        
+        display_status "检测到Windows主机IP为: $WIN_HOST_IP" "info"
+        read -p "请输入代理端口(默认为7890): " proxy_port
+        proxy_port=${proxy_port:-7890}
+        
+        # 设置代理环境变量
+        export http_proxy="http://${WIN_HOST_IP}:${proxy_port}"
+        export https_proxy="http://${WIN_HOST_IP}:${proxy_port}"
+        export all_proxy="socks5://${WIN_HOST_IP}:${proxy_port}"
+        
+        # 为wget和curl设置代理
+        echo "use_proxy=yes" > ~/.wgetrc
+        echo "http_proxy=${http_proxy}" >> ~/.wgetrc
+        echo "https_proxy=${https_proxy}" >> ~/.wgetrc
+        
+        echo "proxy=${http_proxy}" > ~/.curlrc
+        
+        display_status "代理已设置为:" "success"
+        echo "HTTP_PROXY=$http_proxy"
+        echo "HTTPS_PROXY=$https_proxy"
+        echo "ALL_PROXY=$all_proxy"
+        
+        # 测试代理是否有效
+        if curl -s --connect-timeout 5 https://github.com &>/dev/null; then
+            display_status "GitHub连接测试成功，代理设置有效" "success"
+        else
+            display_status "GitHub连接测试失败，请检查代理设置" "warning"
+            read -p "是否手动输入代理地址?(y/n): " manual_proxy
+            if [[ $manual_proxy == "y" || $manual_proxy == "Y" ]]; then
+                read -p "请输入完整的http代理地址(例如: http://127.0.0.1:7890): " custom_proxy
+                if [ ! -z "$custom_proxy" ]; then
+                    export http_proxy="$custom_proxy"
+                    export https_proxy="$custom_proxy"
+                    export all_proxy="${custom_proxy/http/socks5}"
+                    
+                    echo "use_proxy=yes" > ~/.wgetrc
+                    echo "http_proxy=${http_proxy}" >> ~/.wgetrc
+                    echo "https_proxy=${https_proxy}" >> ~/.wgetrc
+                    
+                    echo "proxy=${http_proxy}" > ~/.curlrc
+                    
+                    display_status "代理已手动设置为:" "success"
+                    echo "HTTP_PROXY=$http_proxy"
+                    echo "HTTPS_PROXY=$https_proxy"
+                    echo "ALL_PROXY=$all_proxy"
+                fi
+            fi
+        fi
+    else
+        # 普通环境中手动输入代理
+        read -p "是否需要设置网络代理?(y/n): " need_proxy
+        if [[ $need_proxy == "y" || $need_proxy == "Y" ]]; then
+            read -p "请输入完整的http代理地址(例如: http://127.0.0.1:7890): " custom_proxy
+            if [ ! -z "$custom_proxy" ]; then
+                export http_proxy="$custom_proxy"
+                export https_proxy="$custom_proxy"
+                export all_proxy="${custom_proxy/http/socks5}"
+                
+                echo "use_proxy=yes" > ~/.wgetrc
+                echo "http_proxy=${http_proxy}" >> ~/.wgetrc
+                echo "https_proxy=${https_proxy}" >> ~/.wgetrc
+                
+                echo "proxy=${http_proxy}" > ~/.curlrc
+                
+                display_status "代理已设置为:" "success"
+                echo "HTTP_PROXY=$http_proxy"
+                echo "HTTPS_PROXY=$https_proxy"
+                echo "ALL_PROXY=$all_proxy"
+            fi
+        fi
+    fi
+}
+
+# 清除代理设置
+clear_proxy() {
+    unset http_proxy
+    unset https_proxy
+    unset all_proxy
+    rm -f ~/.wgetrc ~/.curlrc
+    display_status "代理设置已清除" "info"
+}
+
 # 安装 Dria 节点 - 使用官方安装脚本
 install_dria_node() {
     display_status "正在安装 Dria 计算节点..." "info"
@@ -214,6 +325,9 @@ install_dria_node() {
         display_status "Docker服务未运行，无法安装Dria节点。请先确保Docker正常运行。" "error"
         return 1
     fi
+    
+    # 设置代理
+    setup_proxy
     
     # 直接使用手动安装方法，跳过官方脚本
     display_status "使用直接下载安装方法..." "info"
@@ -225,23 +339,50 @@ install_dria_node() {
         return 1
     }
     
-    # 硬编码最新的稳定版本 - 避免API调用问题
-    display_status "使用预设的稳定版本..." "info"
-    LATEST_RELEASE="0.3.5"  # 硬编码稳定版本
+    # 获取最新版本号
+    display_status "尝试获取最新版本信息..." "info"
+    LATEST_RELEASE=$(curl -s --connect-timeout 10 https://api.github.com/repos/firstbatchxyz/dkn-compute-launcher/releases/latest | grep "tag_name" | cut -d '"' -f 4)
+    
+    if [ -z "$LATEST_RELEASE" ] || [[ ! "$LATEST_RELEASE" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        display_status "获取最新版本失败，使用预设的稳定版本..." "warning"
+        LATEST_RELEASE="v0.1.5"  # 更新为GitHub上的实际最新版本
+    fi
+    
+    # 去掉版本号前面的'v'
+    CLEAN_VERSION="${LATEST_RELEASE#v}"
+    display_status "使用版本: $LATEST_RELEASE" "info"
     
     # 下载对应平台的二进制文件 - 使用直接链接
-    DOWNLOAD_URL="https://github.com/firstbatchxyz/dkn-compute-launcher/releases/download/$LATEST_RELEASE/dkn-compute-launcher-linux-amd64"
+    DOWNLOAD_URL="https://github.com/firstbatchxyz/dkn-compute-launcher/releases/download/${LATEST_RELEASE}/dkn-compute-launcher-linux-amd64"
     display_status "下载链接: $DOWNLOAD_URL" "info"
     
     # 使用wget带进度指示下载
     display_status "正在下载Dria计算节点..." "info"
-    if ! wget --progress=dot:giga --timeout=30 "$DOWNLOAD_URL" -O dkn-compute-launcher; then
+    if ! wget --progress=dot:giga --timeout=60 "$DOWNLOAD_URL" -O dkn-compute-launcher; then
         display_status "主下载链接失败，尝试备用链接..." "warning"
         BACKUP_URL="https://github.com/firstbatchxyz/dkn-compute-launcher/releases/latest/download/dkn-compute-launcher-linux-amd64"
-        if ! wget --progress=dot:giga --timeout=30 "$BACKUP_URL" -O dkn-compute-launcher; then
-            display_status "下载失败！请检查网络连接或稍后再试。" "error"
+        if ! wget --progress=dot:giga --timeout=60 "$BACKUP_URL" -O dkn-compute-launcher; then
+            display_status "下载失败！请检查网络连接或代理设置。" "error"
+            display_status "尝试通过手动方式下载..." "info"
+            
+            # 手动下载指导
+            echo "请执行以下命令手动下载:"
+            echo "------------------------"
+            echo "export http_proxy=$http_proxy"
+            echo "export https_proxy=$https_proxy"
+            echo "wget $DOWNLOAD_URL -O /usr/local/bin/dkn-compute-launcher"
+            echo "chmod +x /usr/local/bin/dkn-compute-launcher"
+            echo "------------------------"
+            
             cd "$HOME"
             rm -rf "$TMP_DIR"
+            
+            # 询问是否清除代理设置
+            read -p "是否清除代理设置?(y/n): " clear_proxy_setting
+            if [[ $clear_proxy_setting == "y" || $clear_proxy_setting == "Y" ]]; then
+                clear_proxy
+            fi
+            
             return 1
         fi
     fi
@@ -254,6 +395,13 @@ install_dria_node() {
         display_status "下载的文件不完整或无法执行" "error"
         cd "$HOME"
         rm -rf "$TMP_DIR"
+        
+        # 询问是否清除代理设置
+        read -p "是否清除代理设置?(y/n): " clear_proxy_setting
+        if [[ $clear_proxy_setting == "y" || $clear_proxy_setting == "Y" ]]; then
+            clear_proxy
+        fi
+        
         return 1
     fi
     
@@ -286,16 +434,36 @@ install_dria_node() {
                 display_status "Dria计算节点从源码安装成功" "success"
                 cd "$HOME"
                 rm -rf "$TMP_DIR"
+                
+                # 询问是否清除代理设置
+                read -p "是否清除代理设置?(y/n): " clear_proxy_setting
+                if [[ $clear_proxy_setting == "y" || $clear_proxy_setting == "Y" ]]; then
+                    clear_proxy
+                fi
             else
                 display_status "从源码构建失败" "error"
                 cd "$HOME"
                 rm -rf "$TMP_DIR"
+                
+                # 询问是否清除代理设置
+                read -p "是否清除代理设置?(y/n): " clear_proxy_setting
+                if [[ $clear_proxy_setting == "y" || $clear_proxy_setting == "Y" ]]; then
+                    clear_proxy
+                fi
+                
                 return 1
             fi
         else
             display_status "无法安装Dria计算节点。请尝试手动安装。" "error"
             cd "$HOME"
             rm -rf "$TMP_DIR"
+            
+            # 询问是否清除代理设置
+            read -p "是否清除代理设置?(y/n): " clear_proxy_setting
+            if [[ $clear_proxy_setting == "y" || $clear_proxy_setting == "Y" ]]; then
+                clear_proxy
+            fi
+            
             return 1
         fi
     else
@@ -321,6 +489,21 @@ if grep -q "microsoft" /proc/version 2>/dev/null || grep -q "Microsoft" /proc/sy
         # 等待Docker启动
         sleep 3
     fi
+    
+    # 检查是否存在代理环境变量
+    if [ -f ~/.wgetrc ] || [ -f ~/.curlrc ]; then
+        echo "检测到代理设置，正在应用..."
+        if [ -f ~/.wgetrc ]; then
+            proxy_line=$(grep "http_proxy" ~/.wgetrc)
+            if [ ! -z "$proxy_line" ]; then
+                export http_proxy="${proxy_line#http_proxy=}"
+                export https_proxy="${proxy_line#http_proxy=}"
+                export all_proxy="${proxy_line#http_proxy=}"
+                all_proxy="${all_proxy/http/socks5}"
+                echo "已应用代理设置: $http_proxy"
+            fi
+        fi
+    fi
 fi
 
 # 启动Dria节点
@@ -337,6 +520,14 @@ EOF
     # 确保配置目录存在
     if [ ! -d "$HOME/.dria" ]; then
         display_status "无法创建配置目录" "warning"
+    fi
+    
+    # 询问是否清除代理设置
+    read -p "是否清除代理设置?(y/n): " clear_proxy_setting
+    if [[ $clear_proxy_setting == "y" || $clear_proxy_setting == "Y" ]]; then
+        clear_proxy
+    else
+        display_status "保留当前代理设置，您可以稍后手动清除" "info"
     fi
     
     display_status "Dria节点安装和配置完成，您现在可以使用 'start-dria' 命令启动节点。" "success"
@@ -436,6 +627,11 @@ main_menu() {
             display_status "当前运行在原生Ubuntu环境中" "info"
         fi
         
+        # 显示代理状态
+        if [ ! -z "$http_proxy" ]; then
+            display_status "代理已设置: $http_proxy" "info"
+        fi
+        
         # 尝试下载并显示 logo
         if command -v curl &> /dev/null; then
             curl -s --connect-timeout 5 https://raw.githubusercontent.com/fishzone24/dria/main/logo.sh | bash 2>/dev/null || echo "DRIA 节点管理工具"
@@ -453,8 +649,10 @@ main_menu() {
         echo -e "${MENU_COLOR}5. Dria 节点管理${NORMAL}"
         echo -e "${MENU_COLOR}6. 检查系统环境${NORMAL}"
         echo -e "${MENU_COLOR}7. 检查网络连接${NORMAL}"
-        echo -e "${MENU_COLOR}8. 退出${NORMAL}"
-        read -p "请输入选项（1-8）: " OPTION
+        echo -e "${MENU_COLOR}8. 设置网络代理${NORMAL}"
+        echo -e "${MENU_COLOR}9. 清除网络代理${NORMAL}"
+        echo -e "${MENU_COLOR}0. 退出${NORMAL}"
+        read -p "请输入选项（0-9）: " OPTION
 
         case $OPTION in
             1) setup_prerequisites ;;
@@ -464,7 +662,9 @@ main_menu() {
             5) manage_dria_node ;;
             6) check_system_environment ;;
             7) check_network ;;
-            8) exit 0 ;;
+            8) setup_proxy ;;
+            9) clear_proxy ;;
+            0) exit 0 ;;
             *) display_status "无效选项，请重试。" "error" ;;
         esac
         read -n 1 -s -r -p "按任意键返回主菜单..."
