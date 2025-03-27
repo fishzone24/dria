@@ -83,13 +83,20 @@ install_docker() {
         if ! docker info &>/dev/null; then
             if [ "$ENV_TYPE" = "wsl" ]; then
                 display_status "WSL环境中Docker服务未启动，正在尝试启动..." "warning"
-                service docker start || {
+                sudo service docker start || sudo /etc/init.d/docker start || {
                     display_status "无法启动Docker服务，请检查WSL配置，可能需要手动执行以下命令:" "error"
                     echo "sudo service docker start"
-                    echo "如果问题持续，可能需要重新启动WSL或Windows系统"
+                    echo "如果问题持续，可能需要在Windows PowerShell中执行: wsl --shutdown 后重新启动WSL"
                     read -n 1 -s -r -p "按任意键继续..."
                     return 1
                 }
+                # 等待Docker服务启动
+                sleep 3
+                # 再次检查Docker状态
+                if ! docker info &>/dev/null; then
+                    display_status "Docker服务启动失败，请尝试重启WSL或检查Docker安装" "error"
+                    return 1
+                fi
             else
                 display_status "Docker服务未启动，正在尝试启动..." "warning"
                 systemctl start docker || {
@@ -129,10 +136,31 @@ install_docker() {
     # 在WSL中启动Docker服务
     if [ "$ENV_TYPE" = "wsl" ]; then
         display_status "WSL环境检测到，正在启动Docker服务..." "info"
-        service docker start || {
+        
+        # 添加当前用户到docker组（如果不是root用户）
+        if [[ $EUID -ne 0 ]] && id -u "$USER" &>/dev/null; then
+            usermod -aG docker "$USER"
+            display_status "添加用户 $USER 到docker组" "info"
+        fi
+        
+        # 尝试多种方式启动Docker
+        service docker start || /etc/init.d/docker start || {
             display_status "无法启动Docker服务，请检查WSL配置" "error"
+            display_status "WSL环境中可能需要手动设置Docker，推荐以下步骤:" "warning"
+            echo "1. 在Windows PowerShell中执行: wsl --shutdown"
+            echo "2. 重新打开WSL终端"
+            echo "3. 执行: sudo service docker start"
             return 1
         }
+        
+        # 等待Docker服务启动
+        sleep 3
+        # 检查Docker是否成功启动
+        if ! docker info &>/dev/null; then
+            display_status "Docker安装成功但服务未能自动启动" "warning"
+            display_status "请尝试手动启动Docker: sudo service docker start" "info"
+            return 1
+        fi
     fi
 
     docker --version && display_status "Docker 安装成功。" "success" || display_status "Docker 安装失败。" "error"
@@ -187,20 +215,9 @@ install_dria_node() {
         return 1
     fi
     
-    # 在WSL环境中可能需要特别处理
+    # 在WSL环境中直接使用手动安装方法
     if [ "$ENV_TYPE" = "wsl" ]; then
-        display_status "WSL环境检测到，使用修改后的安装方法..." "info"
-        # 确保用户目录权限正确
-        cd "$HOME" || {
-            display_status "无法访问用户主目录" "error"
-            return 1
-        }
-    fi
-    
-    # 使用官方脚本安装
-    curl -fsSL https://dria.co/launcher | bash
-    if [ $? -ne 0 ]; then
-        display_status "使用官方脚本安装失败，尝试替代方法..." "warning"
+        display_status "WSL环境检测到，使用直接下载安装方法..." "info"
         
         # 创建临时目录
         TMP_DIR=$(mktemp -d)
@@ -211,21 +228,31 @@ install_dria_node() {
         
         # 直接下载最新版本
         display_status "直接下载Dria计算节点..." "info"
-        LATEST_RELEASE=$(curl -s https://api.github.com/repos/firstbatchxyz/dkn-compute-launcher/releases/latest | grep "tag_name" | cut -d '"' -f 4)
+        LATEST_RELEASE=$(curl -s --connect-timeout 10 https://api.github.com/repos/firstbatchxyz/dkn-compute-launcher/releases/latest | grep "tag_name" | cut -d '"' -f 4)
         
         if [ -z "$LATEST_RELEASE" ]; then
-            display_status "无法获取最新版本信息" "error"
-            return 1
+            display_status "无法获取最新版本信息，尝试使用硬编码的最新版本..." "warning"
+            LATEST_RELEASE="0.3.5"  # 硬编码一个最新版本作为后备
         fi
         
-        display_status "找到最新版本: $LATEST_RELEASE" "info"
+        display_status "找到版本: $LATEST_RELEASE" "info"
         
         # 下载对应平台的二进制文件
         DOWNLOAD_URL="https://github.com/firstbatchxyz/dkn-compute-launcher/releases/download/$LATEST_RELEASE/dkn-compute-launcher-linux-amd64"
-        wget -q "$DOWNLOAD_URL" -O dkn-compute-launcher || {
-            display_status "无法下载Dria计算节点" "error"
-            return 1
-        }
+        display_status "下载链接: $DOWNLOAD_URL" "info"
+        wget -q --timeout=30 "$DOWNLOAD_URL" -O dkn-compute-launcher
+        
+        if [ ! -f "dkn-compute-launcher" ] || [ ! -s "dkn-compute-launcher" ]; then
+            display_status "无法下载Dria计算节点，尝试备用方法..." "warning"
+            # 备用下载链接
+            BACKUP_URL="https://github.com/firstbatchxyz/dkn-compute-launcher/releases/latest/download/dkn-compute-launcher-linux-amd64"
+            wget -q --timeout=30 "$BACKUP_URL" -O dkn-compute-launcher || {
+                display_status "下载失败。请检查网络连接或稍后再试。" "error"
+                cd "$HOME"
+                rm -rf "$TMP_DIR"
+                return 1
+            }
+        fi
         
         # 设置权限并移动到系统路径
         chmod +x dkn-compute-launcher
@@ -235,9 +262,55 @@ install_dria_node() {
         cd "$HOME"
         rm -rf "$TMP_DIR"
         
-        display_status "Dria计算节点安装成功（手动方法）" "success"
+        display_status "Dria计算节点安装成功" "success"
     else
-        display_status "Dria 计算节点安装成功。" "success"
+        # 原生Ubuntu环境中使用官方脚本安装
+        # 使用超时命令来控制curl执行时间
+        display_status "使用官方脚本安装..." "info"
+        timeout 60 curl -fsSL https://dria.co/launcher | bash
+        
+        if [ $? -ne 0 ]; then
+            display_status "使用官方脚本安装失败或超时，尝试替代方法..." "warning"
+            
+            # 创建临时目录
+            TMP_DIR=$(mktemp -d)
+            cd "$TMP_DIR" || {
+                display_status "无法创建临时目录" "error"
+                return 1
+            }
+            
+            # 直接下载最新版本
+            display_status "直接下载Dria计算节点..." "info"
+            LATEST_RELEASE=$(curl -s --connect-timeout 10 https://api.github.com/repos/firstbatchxyz/dkn-compute-launcher/releases/latest | grep "tag_name" | cut -d '"' -f 4)
+            
+            if [ -z "$LATEST_RELEASE" ]; then
+                display_status "无法获取最新版本信息，尝试使用硬编码的最新版本..." "warning"
+                LATEST_RELEASE="0.3.5"  # 硬编码一个最新版本作为后备
+            fi
+            
+            display_status "找到版本: $LATEST_RELEASE" "info"
+            
+            # 下载对应平台的二进制文件
+            DOWNLOAD_URL="https://github.com/firstbatchxyz/dkn-compute-launcher/releases/download/$LATEST_RELEASE/dkn-compute-launcher-linux-amd64"
+            wget -q --timeout=30 "$DOWNLOAD_URL" -O dkn-compute-launcher || {
+                display_status "下载失败。请检查网络连接或稍后再试。" "error"
+                cd "$HOME"
+                rm -rf "$TMP_DIR"
+                return 1
+            }
+            
+            # 设置权限并移动到系统路径
+            chmod +x dkn-compute-launcher
+            mv dkn-compute-launcher /usr/local/bin/
+            
+            # 清理临时目录
+            cd "$HOME"
+            rm -rf "$TMP_DIR"
+            
+            display_status "Dria计算节点安装成功（手动方法）" "success"
+        else
+            display_status "Dria计算节点安装成功。" "success"
+        fi
     fi
     
     # 创建一个启动脚本以便于以后的运行
@@ -262,6 +335,18 @@ dkn-compute-launcher start
 EOF
     chmod +x /usr/local/bin/start-dria
     display_status "启动脚本已创建: /usr/local/bin/start-dria" "success"
+    
+    # 添加基本配置信息
+    display_status "正在进行基本配置..." "info"
+    mkdir -p "$HOME/.dria" 2>/dev/null
+    
+    # 确保配置目录存在
+    if [ ! -d "$HOME/.dria" ]; then
+        display_status "无法创建配置目录" "warning"
+    fi
+    
+    display_status "Dria节点安装和配置完成，您现在可以使用 'start-dria' 命令启动节点。" "success"
+    display_status "或者使用 'dkn-compute-launcher settings' 命令配置您的节点。" "info"
 }
 
 # Dria 节点管理功能
@@ -316,6 +401,36 @@ manage_dria_node() {
     read -n 1 -s -r -p "按任意键继续..."
 }
 
+# 检查网络连接
+check_network() {
+    display_status "检查网络连接..." "info"
+    
+    # 测试基本网络连接
+    if ! ping -c 1 -W 3 8.8.8.8 &>/dev/null; then
+        display_status "无法连接到互联网，请检查网络设置" "error"
+        return 1
+    fi
+    
+    # 测试DNS解析
+    if ! nslookup github.com &>/dev/null; then
+        display_status "DNS解析失败，可能影响部分功能" "warning"
+    fi
+    
+    # 测试访问GitHub
+    if ! curl -s --connect-timeout 5 https://api.github.com &>/dev/null; then
+        display_status "无法访问GitHub API，可能导致下载失败" "warning"
+        return 1
+    fi
+    
+    # 测试访问Dria网站
+    if ! curl -s --connect-timeout 5 https://dria.co &>/dev/null; then
+        display_status "无法访问Dria官方网站，可能影响安装过程" "warning"
+    fi
+    
+    display_status "网络连接检查完成" "success"
+    return 0
+}
+
 # 主菜单功能
 main_menu() {
     while true; do
@@ -329,7 +444,7 @@ main_menu() {
         
         # 尝试下载并显示 logo
         if command -v curl &> /dev/null; then
-            curl -s https://raw.githubusercontent.com/fishzone24/dria/main/logo.sh | bash 2>/dev/null || echo "DRIA 节点管理工具"
+            curl -s --connect-timeout 5 https://raw.githubusercontent.com/fishzone24/dria/main/logo.sh | bash 2>/dev/null || echo "DRIA 节点管理工具"
             sleep 1
         else
             echo "DRIA 节点管理工具"
@@ -343,8 +458,9 @@ main_menu() {
         echo -e "${MENU_COLOR}4. 安装 Dria 计算节点${NORMAL}"
         echo -e "${MENU_COLOR}5. Dria 节点管理${NORMAL}"
         echo -e "${MENU_COLOR}6. 检查系统环境${NORMAL}"
-        echo -e "${MENU_COLOR}7. 退出${NORMAL}"
-        read -p "请输入选项（1-7）: " OPTION
+        echo -e "${MENU_COLOR}7. 检查网络连接${NORMAL}"
+        echo -e "${MENU_COLOR}8. 退出${NORMAL}"
+        read -p "请输入选项（1-8）: " OPTION
 
         case $OPTION in
             1) setup_prerequisites ;;
@@ -353,7 +469,8 @@ main_menu() {
             4) install_dria_node ;;
             5) manage_dria_node ;;
             6) check_system_environment ;;
-            7) exit 0 ;;
+            7) check_network ;;
+            8) exit 0 ;;
             *) display_status "无效选项，请重试。" "error" ;;
         esac
         read -n 1 -s -r -p "按任意键返回主菜单..."
@@ -445,6 +562,11 @@ display_info() {
         echo -e "${INFO_COLOR}当前在原生Ubuntu环境中运行${NORMAL}"
     fi
     
+    # 执行简单的网络检查
+    if ! ping -c 1 -W 3 8.8.8.8 &>/dev/null; then
+        echo -e "${ERROR_COLOR}${BOLD}警告: 网络连接可能有问题，这可能会影响安装过程${NORMAL}"
+    fi
+    
     echo -e "${INFO_COLOR}安装过程包括:${NORMAL}"
     echo -e "${INFO_COLOR}- 更新系统并安装必要的依赖${NORMAL}"
     echo -e "${INFO_COLOR}- 安装 Docker 环境${NORMAL}"
@@ -464,12 +586,41 @@ display_info() {
         echo -e "${WARNING_COLOR}1. 确保WSL2集成已启用${NORMAL}"
         echo -e "${WARNING_COLOR}2. 在WSL中Docker可能需要手动启动${NORMAL}"
         echo -e "${WARNING_COLOR}3. 如遇到问题，可尝试重启WSL或Windows系统${NORMAL}"
+        echo -e "${WARNING_COLOR}4. 可在Windows PowerShell中执行 wsl --shutdown 后重新启动WSL${NORMAL}"
     fi
     
     echo -e ""
     read -n 1 -s -r -p "按任意键继续..."
 }
 
+# 初始化函数
+initialize() {
+    # 检查是否需要安装基本工具
+    if ! command -v curl &>/dev/null || ! command -v ping &>/dev/null || ! command -v wget &>/dev/null; then
+        display_status "安装基本工具..." "info"
+        apt update -y &>/dev/null
+        apt install -y curl wget iputils-ping &>/dev/null
+    fi
+    
+    # 为WSL环境执行特殊初始化
+    if [ "$ENV_TYPE" = "wsl" ]; then
+        display_status "执行WSL环境初始化..." "info"
+        
+        # 确保/etc/resolv.conf正确
+        if [ ! -f /etc/resolv.conf ] || ! grep -q "nameserver" /etc/resolv.conf; then
+            display_status "创建/修复DNS配置..." "info"
+            echo "nameserver 8.8.8.8" > /etc/resolv.conf
+        fi
+        
+        # 检查Docker服务可用性
+        if command -v docker &>/dev/null && ! docker info &>/dev/null; then
+            display_status "尝试启动Docker服务..." "info"
+            service docker start &>/dev/null || /etc/init.d/docker start &>/dev/null
+        fi
+    fi
+}
+
 # 执行脚本
+initialize
 display_info
 main_menu 
