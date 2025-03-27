@@ -593,22 +593,156 @@ check_network() {
     # 测试基本网络连接
     if ! ping -c 1 -W 3 8.8.8.8 &>/dev/null; then
         display_status "无法连接到互联网，请检查网络设置" "error"
+        
+        # 显示网络接口信息帮助诊断
+        echo -e "\n网络接口信息:"
+        ip addr show
+        
+        # 检查默认路由
+        echo -e "\n路由信息:"
+        ip route
         return 1
+    else
+        display_status "基础网络连接正常" "success"
     fi
     
-    # 测试DNS解析
-    if ! nslookup github.com &>/dev/null; then
-        display_status "DNS解析失败，可能影响部分功能" "warning"
+    # 测试DNS解析详情
+    echo -e "\nDNS解析测试:"
+    
+    # 检查resolv.conf文件
+    echo -e "\n当前DNS配置(/etc/resolv.conf):"
+    if [ -f /etc/resolv.conf ]; then
+        cat /etc/resolv.conf
+    else
+        echo "文件不存在！"
+    fi
+    
+    # 验证DNS服务器是否可用
+    dns_servers=$(grep nameserver /etc/resolv.conf | awk '{print $2}')
+    if [ -z "$dns_servers" ]; then
+        display_status "没有配置DNS服务器，尝试添加公共DNS" "warning"
+        
+        # 备份当前文件
+        if [ -f /etc/resolv.conf ]; then
+            cp /etc/resolv.conf /etc/resolv.conf.bak
+        fi
+        
+        # 添加Google和Cloudflare DNS
+        echo "nameserver 8.8.8.8" > /etc/resolv.conf
+        echo "nameserver 1.1.1.1" >> /etc/resolv.conf
+        display_status "已添加公共DNS服务器(8.8.8.8和1.1.1.1)" "info"
+        
+        dns_servers="8.8.8.8 1.1.1.1"
+    fi
+    
+    # 测试每个DNS服务器
+    for dns in $dns_servers; do
+        echo -e "\n测试DNS服务器 $dns:"
+        if ping -c 1 -W 2 $dns &>/dev/null; then
+            echo "✅ DNS服务器 $dns 可访问"
+        else
+            echo "❌ DNS服务器 $dns 无法访问"
+        fi
+    done
+    
+    # 实际DNS查询测试
+    echo -e "\n执行DNS解析测试:"
+    if command -v dig &>/dev/null; then
+        # 使用dig进行详细测试
+        echo "使用dig测试github.com解析:"
+        dig github.com +short
+        dig_status=$?
+    elif command -v nslookup &>/dev/null; then
+        # 使用nslookup测试
+        echo "使用nslookup测试github.com解析:"
+        nslookup github.com
+        nslookup_status=$?
+    fi
+    
+    if ! command -v dig &>/dev/null && ! command -v nslookup &>/dev/null; then
+        display_status "安装DNS诊断工具..." "info"
+        apt update -y &>/dev/null
+        apt install -y dnsutils &>/dev/null
+        
+        if command -v dig &>/dev/null; then
+            echo "使用dig测试github.com解析:"
+            dig github.com +short
+            dig_status=$?
+        fi
+    fi
+    
+    # 检查DNS解析状态
+    if ! host github.com &>/dev/null; then
+        display_status "DNS解析失败，正在尝试修复..." "warning"
+        
+        # WSL特定修复
+        if [ "$ENV_TYPE" = "wsl" ]; then
+            display_status "在WSL环境中应用DNS修复..." "info"
+            
+            # 检查是否存在Windows主机IP
+            win_host=$(ip route | grep default | awk '{print $3}')
+            if [ ! -z "$win_host" ]; then
+                echo "nameserver $win_host" > /etc/resolv.conf
+                echo "nameserver 8.8.8.8" >> /etc/resolv.conf
+                echo "nameserver 1.1.1.1" >> /etc/resolv.conf
+                display_status "已设置WSL DNS，使用Windows主机($win_host)作为DNS服务器" "info"
+                
+                # 重新测试DNS解析
+                if host github.com &>/dev/null; then
+                    display_status "DNS解析问题已修复" "success"
+                else
+                    display_status "DNS问题仍然存在" "error"
+                fi
+            else
+                display_status "无法获取Windows主机IP" "error"
+            fi
+        else
+            # 常规Ubuntu修复
+            echo "nameserver 8.8.8.8" > /etc/resolv.conf
+            echo "nameserver 1.1.1.1" >> /etc/resolv.conf
+            display_status "已重置DNS配置为公共DNS服务器" "info"
+            
+            # 重新测试DNS解析
+            if host github.com &>/dev/null; then
+                display_status "DNS解析问题已修复" "success"
+            else
+                display_status "DNS问题仍然存在，请手动检查网络环境" "error"
+            fi
+        fi
+    else
+        display_status "DNS解析正常" "success"
     fi
     
     # 测试访问GitHub
-    if ! curl -s --connect-timeout 5 https://api.github.com &>/dev/null; then
-        display_status "无法访问GitHub API，可能导致下载失败" "warning"
-        return 1
+    echo -e "\nGitHub连接测试:"
+    if curl -s --connect-timeout 5 https://api.github.com &>/dev/null; then
+        display_status "GitHub API访问正常" "success"
+    else
+        display_status "无法访问GitHub API，可能需要设置代理" "warning"
+        
+        # 显示代理设置状态
+        if [ ! -z "$http_proxy" ]; then
+            echo "当前代理设置: $http_proxy"
+        else
+            echo "未设置HTTP代理"
+        fi
+        
+        # 如果在WSL环境中，提示设置代理
+        if [ "$ENV_TYPE" = "wsl" ]; then
+            win_host=$(ip route | grep default | awk '{print $3}')
+            if [ ! -z "$win_host" ]; then
+                display_status "建议使用Windows主机代理，可通过选项8设置代理" "info"
+                echo "Windows主机IP: $win_host"
+                echo "常用代理端口: 7890、1080、8080、8118等"
+            fi
+        fi
     fi
     
     # 测试访问Dria网站
-    if ! curl -s --connect-timeout 5 https://dria.co &>/dev/null; then
+    echo -e "\nDria网站连接测试:"
+    if curl -s --connect-timeout 5 https://dria.co &>/dev/null; then
+        display_status "Dria官方网站访问正常" "success"
+    else
         display_status "无法访问Dria官方网站，可能影响安装过程" "warning"
     fi
     
