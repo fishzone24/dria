@@ -1425,13 +1425,15 @@ main_menu() {
         echo -e "${MENU_COLOR}8. 设置网络代理${NORMAL}"
         echo -e "${MENU_COLOR}9. 清除网络代理${NORMAL}"
         
-        # 添加WSL特定选项
+        # WSL特定选项
         if [ "$ENV_TYPE" = "wsl" ]; then
             echo -e "${MENU_COLOR}W. WSL网络优化配置${NORMAL}"
+            echo -e "${MENU_COLOR}D. DNS修复工具${NORMAL}"
+            echo -e "${MENU_COLOR}F. 超级修复工具${NORMAL}"
         fi
         
         echo -e "${MENU_COLOR}0. 退出${NORMAL}"
-        read -p "请输入选项（0-9/W）: " OPTION
+        read -p "请输入选项（0-9/W/D/F）: " OPTION
 
         case $OPTION in
             1) setup_prerequisites ;;
@@ -1449,6 +1451,25 @@ main_menu() {
                 else
                     display_status "此选项仅适用于WSL环境" "error"
                 fi 
+                ;;
+            [Dd])
+                if [ "$ENV_TYPE" = "wsl" ]; then
+                    fix_wsl_dns
+                else
+                    display_status "此选项仅适用于WSL环境" "error"
+                fi
+                ;;
+            [Ff])
+                if [ "$ENV_TYPE" = "wsl" ]; then
+                    create_direct_connect_tool
+                    display_status "超级修复工具已创建，可以使用 'dria-superfix' 命令启动" "success"
+                    read -p "是否立即运行超级修复工具?(y/n): " run_superfix
+                    if [[ $run_superfix == "y" || $run_superfix == "Y" ]]; then
+                        /usr/local/bin/dria-superfix
+                    fi
+                else
+                    display_status "此选项仅适用于WSL环境" "error"
+                fi
                 ;;
             0) exit 0 ;;
             *) display_status "无效选项，请重试。" "error" ;;
