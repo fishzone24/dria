@@ -135,7 +135,7 @@ main_menu() {
         clear
         # 尝试下载并显示 logo
         if command -v curl &> /dev/null; then
-            curl -s https://raw.githubusercontent.com/ziqing888/logo.sh/refs/heads/main/logo.sh | bash 2>/dev/null || echo "DRIA 节点管理工具"
+            curl -s https://raw.githubusercontent.com/fishzone24/dria/main/logo.sh | bash 2>/dev/null || echo "DRIA 节点管理工具"
             sleep 1
         else
             echo "DRIA 节点管理工具"
