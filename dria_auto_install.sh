@@ -215,103 +215,97 @@ install_dria_node() {
         return 1
     fi
     
-    # 在WSL环境中直接使用手动安装方法
-    if [ "$ENV_TYPE" = "wsl" ]; then
-        display_status "WSL环境检测到，使用直接下载安装方法..." "info"
-        
-        # 创建临时目录
-        TMP_DIR=$(mktemp -d)
-        cd "$TMP_DIR" || {
-            display_status "无法创建临时目录" "error"
-            return 1
-        }
-        
-        # 直接下载最新版本
-        display_status "直接下载Dria计算节点..." "info"
-        LATEST_RELEASE=$(curl -s --connect-timeout 10 https://api.github.com/repos/firstbatchxyz/dkn-compute-launcher/releases/latest | grep "tag_name" | cut -d '"' -f 4)
-        
-        if [ -z "$LATEST_RELEASE" ]; then
-            display_status "无法获取最新版本信息，尝试使用硬编码的最新版本..." "warning"
-            LATEST_RELEASE="0.3.5"  # 硬编码一个最新版本作为后备
-        fi
-        
-        display_status "找到版本: $LATEST_RELEASE" "info"
-        
-        # 下载对应平台的二进制文件
-        DOWNLOAD_URL="https://github.com/firstbatchxyz/dkn-compute-launcher/releases/download/$LATEST_RELEASE/dkn-compute-launcher-linux-amd64"
-        display_status "下载链接: $DOWNLOAD_URL" "info"
-        wget -q --timeout=30 "$DOWNLOAD_URL" -O dkn-compute-launcher
-        
-        if [ ! -f "dkn-compute-launcher" ] || [ ! -s "dkn-compute-launcher" ]; then
-            display_status "无法下载Dria计算节点，尝试备用方法..." "warning"
-            # 备用下载链接
-            BACKUP_URL="https://github.com/firstbatchxyz/dkn-compute-launcher/releases/latest/download/dkn-compute-launcher-linux-amd64"
-            wget -q --timeout=30 "$BACKUP_URL" -O dkn-compute-launcher || {
-                display_status "下载失败。请检查网络连接或稍后再试。" "error"
-                cd "$HOME"
-                rm -rf "$TMP_DIR"
-                return 1
-            }
-        fi
-        
-        # 设置权限并移动到系统路径
-        chmod +x dkn-compute-launcher
-        mv dkn-compute-launcher /usr/local/bin/
-        
-        # 清理临时目录
-        cd "$HOME"
-        rm -rf "$TMP_DIR"
-        
-        display_status "Dria计算节点安装成功" "success"
-    else
-        # 原生Ubuntu环境中使用官方脚本安装
-        # 使用超时命令来控制curl执行时间
-        display_status "使用官方脚本安装..." "info"
-        timeout 60 curl -fsSL https://dria.co/launcher | bash
-        
-        if [ $? -ne 0 ]; then
-            display_status "使用官方脚本安装失败或超时，尝试替代方法..." "warning"
-            
-            # 创建临时目录
-            TMP_DIR=$(mktemp -d)
-            cd "$TMP_DIR" || {
-                display_status "无法创建临时目录" "error"
-                return 1
-            }
-            
-            # 直接下载最新版本
-            display_status "直接下载Dria计算节点..." "info"
-            LATEST_RELEASE=$(curl -s --connect-timeout 10 https://api.github.com/repos/firstbatchxyz/dkn-compute-launcher/releases/latest | grep "tag_name" | cut -d '"' -f 4)
-            
-            if [ -z "$LATEST_RELEASE" ]; then
-                display_status "无法获取最新版本信息，尝试使用硬编码的最新版本..." "warning"
-                LATEST_RELEASE="0.3.5"  # 硬编码一个最新版本作为后备
-            fi
-            
-            display_status "找到版本: $LATEST_RELEASE" "info"
-            
-            # 下载对应平台的二进制文件
-            DOWNLOAD_URL="https://github.com/firstbatchxyz/dkn-compute-launcher/releases/download/$LATEST_RELEASE/dkn-compute-launcher-linux-amd64"
-            wget -q --timeout=30 "$DOWNLOAD_URL" -O dkn-compute-launcher || {
-                display_status "下载失败。请检查网络连接或稍后再试。" "error"
-                cd "$HOME"
-                rm -rf "$TMP_DIR"
-                return 1
-            }
-            
-            # 设置权限并移动到系统路径
-            chmod +x dkn-compute-launcher
-            mv dkn-compute-launcher /usr/local/bin/
-            
-            # 清理临时目录
+    # 直接使用手动安装方法，跳过官方脚本
+    display_status "使用直接下载安装方法..." "info"
+    
+    # 创建临时目录
+    TMP_DIR=$(mktemp -d)
+    cd "$TMP_DIR" || {
+        display_status "无法创建临时目录" "error"
+        return 1
+    }
+    
+    # 硬编码最新的稳定版本 - 避免API调用问题
+    display_status "使用预设的稳定版本..." "info"
+    LATEST_RELEASE="0.3.5"  # 硬编码稳定版本
+    
+    # 下载对应平台的二进制文件 - 使用直接链接
+    DOWNLOAD_URL="https://github.com/firstbatchxyz/dkn-compute-launcher/releases/download/$LATEST_RELEASE/dkn-compute-launcher-linux-amd64"
+    display_status "下载链接: $DOWNLOAD_URL" "info"
+    
+    # 使用wget带进度指示下载
+    display_status "正在下载Dria计算节点..." "info"
+    if ! wget --progress=dot:giga --timeout=30 "$DOWNLOAD_URL" -O dkn-compute-launcher; then
+        display_status "主下载链接失败，尝试备用链接..." "warning"
+        BACKUP_URL="https://github.com/firstbatchxyz/dkn-compute-launcher/releases/latest/download/dkn-compute-launcher-linux-amd64"
+        if ! wget --progress=dot:giga --timeout=30 "$BACKUP_URL" -O dkn-compute-launcher; then
+            display_status "下载失败！请检查网络连接或稍后再试。" "error"
             cd "$HOME"
             rm -rf "$TMP_DIR"
-            
-            display_status "Dria计算节点安装成功（手动方法）" "success"
-        else
-            display_status "Dria计算节点安装成功。" "success"
+            return 1
         fi
     fi
+    
+    # 设置权限并移动到系统路径
+    chmod +x dkn-compute-launcher
+    
+    # 检查文件是否正确下载
+    if [ ! -f "dkn-compute-launcher" ] || [ ! -s "dkn-compute-launcher" ] || [ ! -x "dkn-compute-launcher" ]; then
+        display_status "下载的文件不完整或无法执行" "error"
+        cd "$HOME"
+        rm -rf "$TMP_DIR"
+        return 1
+    fi
+    
+    # 测试可执行文件是否有效
+    if ! ./dkn-compute-launcher --version &>/dev/null; then
+        display_status "下载的可执行文件不正常，将尝试从源代码构建..." "warning"
+        
+        # 如果从二进制安装失败，尝试从源码构建
+        if command -v cargo &>/dev/null; then
+            display_status "检测到Rust环境，尝试从源码安装..." "info"
+            
+            # 安装rust工具链
+            if ! command -v rustc &>/dev/null; then
+                display_status "正在安装Rust工具链..." "info"
+                curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+                source "$HOME/.cargo/env"
+            fi
+            
+            # 克隆仓库
+            if ! command -v git &>/dev/null; then
+                apt update && apt install -y git
+            fi
+            
+            git clone https://github.com/firstbatchxyz/dkn-compute-launcher.git
+            cd dkn-compute-launcher
+            cargo build --release
+            
+            if [ -f "target/release/dkn-compute-launcher" ]; then
+                cp target/release/dkn-compute-launcher /usr/local/bin/
+                display_status "Dria计算节点从源码安装成功" "success"
+                cd "$HOME"
+                rm -rf "$TMP_DIR"
+            else
+                display_status "从源码构建失败" "error"
+                cd "$HOME"
+                rm -rf "$TMP_DIR"
+                return 1
+            fi
+        else
+            display_status "无法安装Dria计算节点。请尝试手动安装。" "error"
+            cd "$HOME"
+            rm -rf "$TMP_DIR"
+            return 1
+        fi
+    else
+        mv dkn-compute-launcher /usr/local/bin/
+        display_status "Dria计算节点安装成功" "success"
+    fi
+    
+    # 清理临时目录
+    cd "$HOME"
+    rm -rf "$TMP_DIR"
     
     # 创建一个启动脚本以便于以后的运行
     cat > /usr/local/bin/start-dria << 'EOF'
