@@ -319,7 +319,7 @@ clear_proxy() {
 # WSL网络优化功能
 configure_wsl_network() {
     display_status "WSL网络优化工具" "info"
-    echo "此功能将自动配置Windows主机上的端口转发，使外部网络能够访问WSL中的Dria节点。"
+    echo "此功能将配置Windows主机上的端口转发，使外部网络能够访问WSL中的Dria节点。"
     echo ""
     
     # 检查是否在WSL环境中
@@ -387,47 +387,69 @@ EOF
     
     display_status "创建PowerShell脚本: $TEMP_PS1" "success"
     
-    # 检测可用的Windows PowerShell路径
-    POWERSHELL_EXE=""
-    if command -v powershell.exe &>/dev/null; then
-        POWERSHELL_EXE="powershell.exe"
-    elif [ -f "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe" ]; then
-        POWERSHELL_EXE="/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe"
-    elif [ -f "/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe" ]; then
-        POWERSHELL_EXE="/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe"
-    else
-        display_status "无法找到Windows PowerShell可执行文件" "error"
-        echo "请手动复制以下脚本到Windows PowerShell(管理员)中运行:"
-        echo "-----------------------------------------------------------"
-        cat "$TEMP_PS1"
-        echo "-----------------------------------------------------------"
-        return 1
-    fi
-    
-    # 将路径转换为Windows格式
-    WIN_PS1_PATH=$(wslpath -w "$TEMP_PS1")
-    
-    display_status "尝试自动执行PowerShell脚本..." "info"
-    echo "注意: 如果出现UAC提示，请点击'是'授予管理员权限"
-    echo ""
+    # 尝试自动执行PowerShell脚本
+    display_status "尝试使用Windows命令..." "info"
     
     # 创建提升权限的批处理文件
     TEMP_BAT="/tmp/run_as_admin_$(date +%s).bat"
     cat > "$TEMP_BAT" << EOF
 @echo off
-powershell -Command "Start-Process PowerShell -ArgumentList '-ExecutionPolicy Bypass -File \"$WIN_PS1_PATH\"' -Verb RunAs"
+powershell -Command "Start-Process PowerShell -ArgumentList '-ExecutionPolicy Bypass -File \"$TEMP_PS1\"' -Verb RunAs"
 EOF
     
     # 转换为Windows路径
-    WIN_BAT_PATH=$(wslpath -w "$TEMP_BAT")
+    WIN_PS1_PATH=$(wslpath -w "$TEMP_PS1" 2>/dev/null)
+    WIN_BAT_PATH=$(wslpath -w "$TEMP_BAT" 2>/dev/null)
     
-    # 使用cmd.exe运行批处理文件
-    cmd.exe /c "$WIN_BAT_PATH"
+    # 尝试使用cmd.exe运行批处理文件
+    if command -v cmd.exe &>/dev/null; then
+        display_status "使用cmd.exe执行脚本..." "info"
+        echo "注意: 如果出现UAC提示，请点击'是'授予管理员权限"
+        cmd.exe /c "$WIN_BAT_PATH" 2>/dev/null
+        
+        if [ $? -eq 0 ]; then
+            display_status "已请求以管理员身份运行PowerShell脚本" "info"
+            echo "如果您在Windows中看到了UAC提示，请确认以允许脚本运行。"
+            echo "请等待PowerShell窗口完成配置后关闭。"
+        else
+            display_status "无法自动执行Windows命令，需要手动配置" "warning"
+            manual_windows_setup=true
+        fi
+    else
+        display_status "在此WSL环境中无法使用Windows命令，需要手动配置" "warning"
+        manual_windows_setup=true
+    fi
     
-    display_status "已请求以管理员身份运行PowerShell脚本" "info"
-    echo "如果您在Windows中看到了UAC提示，请确认以允许脚本运行。"
-    echo "请等待PowerShell窗口完成配置后关闭。"
-    echo ""
+    # 如果无法自动执行，提供手动步骤
+    if [ "$manual_windows_setup" = true ]; then
+        display_status "请手动在Windows中执行以下步骤:" "info"
+        echo "1. 复制以下PowerShell脚本内容"
+        echo "2. 在Windows中打开PowerShell(以管理员身份运行)"
+        echo "3. 粘贴并执行脚本内容"
+        echo "4. 完成后回到此WSL窗口继续操作"
+        echo ""
+        echo "----------复制以下内容----------"
+        # 为手动复制创建更简单的脚本内容
+        echo "# WSL IP地址: $WSL_IP"
+        echo "# 复制以下全部内容到管理员PowerShell"
+        echo '$wslIP = "'$WSL_IP'"'
+        echo 'Write-Host "配置端口转发: 外部 -> $wslIP"'
+        echo 'netsh interface portproxy delete v4tov4 listenport=4001 listenaddress=0.0.0.0 2>$null'
+        echo 'netsh interface portproxy delete v4tov4 listenport=1337 listenaddress=0.0.0.0 2>$null'
+        echo 'netsh interface portproxy delete v4tov4 listenport=11434 listenaddress=0.0.0.0 2>$null'
+        echo 'netsh interface portproxy add v4tov4 listenport=4001 listenaddress=0.0.0.0 connectport=4001 connectaddress=$wslIP'
+        echo 'netsh interface portproxy add v4tov4 listenport=1337 listenaddress=0.0.0.0 connectport=1337 connectaddress=$wslIP'
+        echo 'netsh interface portproxy add v4tov4 listenport=11434 listenaddress=0.0.0.0 connectport=11434 connectaddress=$wslIP'
+        echo 'New-NetFirewallRule -DisplayName "WSL-Dria-4001-TCP" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 4001 -ErrorAction SilentlyContinue'
+        echo 'New-NetFirewallRule -DisplayName "WSL-Dria-4001-UDP" -Direction Inbound -Action Allow -Protocol UDP -LocalPort 4001 -ErrorAction SilentlyContinue'
+        echo 'New-NetFirewallRule -DisplayName "WSL-Dria-1337-TCP" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 1337 -ErrorAction SilentlyContinue'
+        echo 'New-NetFirewallRule -DisplayName "WSL-Dria-11434-TCP" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 11434 -ErrorAction SilentlyContinue'
+        echo 'netsh interface portproxy show v4tov4'
+        echo "----------复制以上内容----------"
+        echo ""
+        
+        read -p "按回车键继续，确认您已在Windows中执行上述脚本... " continue_setup
+    fi
     
     # 配置防火墙和服务
     display_status "配置WSL内部防火墙和服务..." "info"
@@ -472,7 +494,11 @@ EOF
     "enable_relay": true,
     "relay_discovery": true,
     "direct_connection_timeout_ms": 10000,
-    "relay_connection_timeout_ms": 30000
+    "relay_connection_timeout_ms": 30000,
+    "external_multiaddrs": [
+      "/ip4/$WSL_IP/tcp/4001",
+      "/ip4/$WSL_IP/udp/4001/quic-v1"
+    ]
   }
 }
 EOF
@@ -495,6 +521,19 @@ if ! ping -c 1 -W 3 8.8.8.8 &>/dev/null; then
     echo "nameserver $WIN_HOST_IP" > /etc/resolv.conf
     echo "nameserver 8.8.8.8" >> /etc/resolv.conf
     echo "nameserver 1.1.1.1" >> /etc/resolv.conf
+fi
+
+# 显示IP地址信息
+echo "WSL IP信息:"
+ip -4 addr show
+echo ""
+
+# 清理Docker网络（可选，如有网络问题时使用）
+if [ "$1" == "--reset-docker" ]; then
+    echo "重置Docker网络..."
+    docker network prune -f
+    systemctl restart docker
+    sleep 2
 fi
 
 # 使用优化配置启动Dria节点
@@ -534,10 +573,21 @@ EOF
     # 创建一个自动重启脚本
     cat > /usr/local/bin/dria-restart << 'EOF'
 #!/bin/bash
-systemctl restart dria-node.service
-echo "Dria节点已重启"
+echo "正在重启Dria节点服务..."
+systemctl restart dria-node.service && echo "Dria节点已重启"
 EOF
     chmod +x /usr/local/bin/dria-restart
+    
+    # 创建重置脚本
+    cat > /usr/local/bin/dria-reset << 'EOF'
+#!/bin/bash
+echo "重置Dria节点网络..."
+systemctl stop dria-node
+docker network prune -f
+systemctl start dria-node
+echo "Dria节点网络已重置"
+EOF
+    chmod +x /usr/local/bin/dria-reset
     
     display_status "WSL网络优化配置完成" "success"
     echo ""
@@ -546,10 +596,25 @@ EOF
     echo "2. 停止节点: systemctl stop dria-node"
     echo "3. 重启节点: dria-restart"
     echo "4. 检查状态: systemctl status dria-node"
-    echo "5. 手动启动: dria-optimized"
+    echo "5. 重置网络: dria-reset"
+    echo "6. 手动启动: dria-optimized"
+    echo "7. 带网络重置启动: dria-optimized --reset-docker"
     echo ""
     display_status "每次重启Windows或WSL后，请重新运行此功能以更新端口转发" "warning"
     echo "Windows主机IP可能会在重启后发生变化" 
+    
+    # 检查当前节点状态，如果在运行，询问是否重启应用新配置
+    if systemctl is-active --quiet dria-node; then
+        display_status "检测到Dria节点当前正在运行" "info"
+        read -p "是否重启节点以应用新配置?(y/n): " restart_node
+        if [[ $restart_node == "y" || $restart_node == "Y" ]]; then
+            display_status "重启Dria节点..." "info"
+            systemctl restart dria-node
+            display_status "Dria节点已重启" "success"
+        fi
+    else
+        display_status "Dria节点当前未运行，您可以使用 'systemctl start dria-node' 启动" "info"
+    fi
     
     return 0
 }
