@@ -450,8 +450,13 @@ create_direct_connect_tool() {
     display_status "正在创建直接IP连接工具..." "info"
     
     # 创建direct_network_config.json
-    cat > /root/.dria/direct_network_config.json << EOF
+    mkdir -p /root/.dria
+    cat > /root/.dria/settings.json << EOF
 {
+    "network": {
+        "connection_timeout": 300,
+        "direct_connection_timeout": 20000,
+        "relay_connection_timeout": 60000,
     "external_multiaddrs": [
         "/ip4/0.0.0.0/tcp/4001"
     ],
