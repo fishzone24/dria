@@ -447,134 +447,93 @@ EOF
 
 # 添加直接IP连接工具
 create_direct_connect_tool() {
-    display_status "创建直接IP连接工具" "info"
+    display_status "正在创建直接IP连接工具..." "info"
     
-    # 创建使用IP直接连接的启动命令
-    cat > /usr/local/bin/dria-direct << 'EOF'
-#!/bin/bash
-echo "使用IP地址直接连接启动Dria节点..."
-echo "这种方式可以绕过DNS解析问题"
-
-# 先运行DNS修复脚本
-if [ -f /usr/local/bin/fix-dns.sh ]; then
-    /usr/local/bin/fix-dns.sh
-fi
-
-# 创建优化的网络配置
-mkdir -p "$HOME/.dria" 2>/dev/null
-cat > "$HOME/.dria/direct_network_config.json" << 'CONFIG'
+    # 创建direct_network_config.json
+    cat > /root/.dria/direct_network_config.json << EOF
 {
-  "libp2p": {
-    "listen_addresses": [
-      "/ip4/0.0.0.0/tcp/4001",
-      "/ip4/0.0.0.0/udp/4001/quic-v1"
-    ],
-    "external_addresses": [],
-    "bootstrap_peers": [
-      "/ip4/34.145.16.76/tcp/4001/p2p/16Uiu2HAmCj9DuTQgzepxfKP1byDZoQbfkh4ZoQGihHEL1fuof3FJ",
-      "/ip4/34.42.109.93/tcp/4001/p2p/16Uiu2HAm9fQCDYwmkDCNtb5XZC5p8dUcHpvN9JMPeA9wJMndRPMw",
-      "/ip4/34.42.43.172/tcp/4001/p2p/16Uiu2HAmVg8DxJ2MwAwQwA6Fj8fgbYBRqsTu3KAaWhq7Z7eMAKBL",
-      "/ip4/35.200.247.78/tcp/4001/p2p/16Uiu2HAmAkVoCpUHyZaXSddzByWMvYyR7ekCDJsM19mYHfMebYQQ",
-      "/ip4/34.92.171.75/tcp/4001/p2p/16Uiu2HAm1xBHVUCGjyiz8iakVoDR1qjj3bJT2ZYbPLyVTHX1pxKF"
-    ],
-    "connection_idle_timeout": 300,
-    "enable_relay": true,
-    "relay_discovery": true,
-    "direct_connection_timeout_ms": 20000,
-    "relay_connection_timeout_ms": 60000,
     "external_multiaddrs": [
-      "/ip4/$(hostname -I | awk '{print $1}')/tcp/4001",
-      "/ip4/$(hostname -I | awk '{print $1}')/udp/4001/quic-v1"
+        "/ip4/0.0.0.0/tcp/4001"
+    ],
+    "bootstrap_nodes": [
+        "/ip4/34.145.16.76/tcp/4001/p2p/QmXZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
+        "/ip4/34.42.109.93/tcp/4001/p2p/QmYZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
+        "/ip4/34.42.43.172/tcp/4001/p2p/QmZZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
+        "/ip4/35.200.247.78/tcp/4001/p2p/QmWZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
+        "/ip4/34.92.171.75/tcp/4001/p2p/QmVZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV"
     ]
-  }
 }
-CONFIG
-
-# 创建或更新settings.json以使用我们的配置
-CONFIG_PATH="$HOME/.dria/direct_network_config.json"
-echo "{\"network-config\": \"$CONFIG_PATH\"}" > "$HOME/.dria/settings.json"
-
-# 使用IP地址直接连接引导节点
-echo "启动Dria节点..."
+EOF
+    
+    # 创建dria-direct命令
+    cat > /usr/local/bin/dria-direct << EOF
+#!/bin/bash
 export DKN_LOG=debug
-dkn-compute-launcher start
+export DKN_NETWORK_CONFIG=/root/.dria/direct_network_config.json
+dkn-compute-launcher start --network-config \$DKN_NETWORK_CONFIG
 EOF
     chmod +x /usr/local/bin/dria-direct
     
-    # 创建"超级修复"工具，一键解决所有问题
-    cat > /usr/local/bin/dria-superfix << 'EOF'
+    display_status "直接IP连接工具创建完成" "success"
+}
+
+# 创建超级修复工具
+create_superfix_tool() {
+    display_status "正在创建超级修复工具..." "info"
+    
+    cat > /usr/local/bin/dria-superfix << EOF
 #!/bin/bash
-echo "====== Dria超级修复工具 ======"
-echo "这个工具会尝试修复所有常见的连接问题"
-
-# 停止当前节点
-echo "1. 停止当前节点..."
-systemctl stop dria-node
-
-# 修复DNS
-echo "2. 修复DNS配置..."
-if [ -f /usr/local/bin/fix-dns.sh ]; then
-    /usr/local/bin/fix-dns.sh
-fi
-
-# 重置Docker网络
-echo "3. 重置Docker网络..."
-docker network prune -f
-systemctl restart docker
+echo "正在执行超级修复..."
+systemctl stop dria-node 2>/dev/null
+pkill -f dkn-compute-launcher
 sleep 2
 
-# 修改配置文件使用IP地址
-echo "4. 优化网络配置..."
-mkdir -p "$HOME/.dria" 2>/dev/null
-cat > "$HOME/.dria/network_config.json" << 'CONFIG'
+# 修复DNS
+echo "nameserver 8.8.8.8" > /etc/resolv.conf
+echo "nameserver 1.1.1.1" >> /etc/resolv.conf
+
+# 重置Docker网络
+if command -v docker &> /dev/null; then
+    docker network prune -f
+    docker system prune -f
+fi
+
+# 创建优化的网络配置
+mkdir -p /root/.dria
+cat > /root/.dria/network_config.json << 'EOL'
 {
-  "libp2p": {
-    "listen_addresses": [
-      "/ip4/0.0.0.0/tcp/4001",
-      "/ip4/0.0.0.0/udp/4001/quic-v1"
-    ],
-    "external_addresses": [],
-    "bootstrap_peers": [
-      "/ip4/34.145.16.76/tcp/4001/p2p/16Uiu2HAmCj9DuTQgzepxfKP1byDZoQbfkh4ZoQGihHEL1fuof3FJ",
-      "/ip4/34.42.109.93/tcp/4001/p2p/16Uiu2HAm9fQCDYwmkDCNtb5XZC5p8dUcHpvN9JMPeA9wJMndRPMw",
-      "/ip4/34.42.43.172/tcp/4001/p2p/16Uiu2HAmVg8DxJ2MwAwQwA6Fj8fgbYBRqsTu3KAaWhq7Z7eMAKBL",
-      "/ip4/35.200.247.78/tcp/4001/p2p/16Uiu2HAmAkVoCpUHyZaXSddzByWMvYyR7ekCDJsM19mYHfMebYQQ",
-      "/ip4/34.92.171.75/tcp/4001/p2p/16Uiu2HAm1xBHVUCGjyiz8iakVoDR1qjj3bJT2ZYbPLyVTHX1pxKF"
-    ],
-    "connection_idle_timeout": 300,
-    "enable_relay": true,
-    "relay_discovery": true,
-    "direct_connection_timeout_ms": 20000,
-    "relay_connection_timeout_ms": 60000,
     "external_multiaddrs": [
-      "/ip4/$(hostname -I | awk '{print $1}')/tcp/4001",
-      "/ip4/$(hostname -I | awk '{print $1}')/udp/4001/quic-v1"
+        "/ip4/0.0.0.0/tcp/4001"
+    ],
+    "bootstrap_nodes": [
+        "/ip4/34.145.16.76/tcp/4001/p2p/QmXZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
+        "/ip4/34.42.109.93/tcp/4001/p2p/QmYZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
+        "/ip4/34.42.43.172/tcp/4001/p2p/QmZZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
+        "/ip4/35.200.247.78/tcp/4001/p2p/QmWZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
+        "/ip4/34.92.171.75/tcp/4001/p2p/QmVZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV"
     ]
-  }
 }
-CONFIG
+EOL
 
-# 创建或更新settings.json以使用我们的配置
-mkdir -p "$HOME/.dria" 2>/dev/null
-CONFIG_PATH="$HOME/.dria/network_config.json"
-echo "{\"network-config\": \"$CONFIG_PATH\"}" > "$HOME/.dria/settings.json"
+# 创建优化的settings.json
+cat > /root/.dria/settings.json << 'EOL'
+{
+    "network": {
+        "connection_timeout": 300,
+        "direct_connection_timeout": 20000,
+        "relay_connection_timeout": 60000
+    }
+}
+EOL
 
-# 以增强模式启动
-echo "5. 以增强模式启动节点..."
-echo "   启动中，请等待..."
+# 启动节点
 export DKN_LOG=debug
-dkn-compute-launcher start
-
-# 注意：此脚本会一直运行，直到用户按Ctrl+C停止
+export DKN_NETWORK_CONFIG=/root/.dria/network_config.json
+dkn-compute-launcher start --network-config \$DKN_NETWORK_CONFIG
 EOF
+    
     chmod +x /usr/local/bin/dria-superfix
-    
-    display_status "直接连接工具创建成功" "success"
-    echo "现在您可以使用以下命令:"
-    echo "1. dria-direct - 使用IP地址直接连接启动"
-    echo "2. dria-superfix - 一键式超级修复并启动"
-    
-    return 0
+    display_status "超级修复工具创建完成" "success"
 }
 
 # 修改configure_wsl_network函数，增加DNS修复和直接连接工具
@@ -1111,7 +1070,10 @@ manage_dria_node() {
     echo -e "${MENU_COLOR}8. 返回主菜单${NORMAL}"
     echo -e "${MENU_COLOR}9. 设置网络代理${NORMAL}"
     echo -e "${MENU_COLOR}H. Ollama修复工具${NORMAL}"
-    read -p "请输入选项（1-8/9/H）: " OPTION
+    echo -e "${MENU_COLOR}D. DNS修复工具${NORMAL}"
+    echo -e "${MENU_COLOR}F. 超级修复工具${NORMAL}"
+    echo -e "${MENU_COLOR}I. 直接IP连接${NORMAL}"
+    read -p "请输入选项（1-8/9/H/D/F/I）: " OPTION
 
     case $OPTION in
         1) dkn-compute-launcher start ;;
@@ -1131,6 +1093,26 @@ manage_dria_node() {
             display_status "Ollama目录权限已修复" "success"
             read -n 1 -s -r -p "按任意键继续..."
             ;;
+        [Dd])
+            diagnose_network
+            read -n 1 -s -r -p "按任意键继续..."
+            ;;
+        [Ff])
+            create_superfix_tool
+            display_status "超级修复工具已创建，可以使用 'dria-superfix' 命令启动" "success"
+            read -p "是否立即运行超级修复工具?(y/n): " run_superfix
+            if [[ $run_superfix == "y" || $run_superfix == "Y" ]]; then
+                /usr/local/bin/dria-superfix
+            fi
+            ;;
+        [Ii])
+            create_direct_connect_tool
+            display_status "直接IP连接工具已创建，可以使用 'dria-direct' 命令启动" "success"
+            read -p "是否立即运行直接IP连接?(y/n): " run_direct
+            if [[ $run_direct == "y" || $run_direct == "Y" ]]; then
+                /usr/local/bin/dria-direct
+            fi
+            ;;
         [Ww]) 
             if [ "$ENV_TYPE" = "wsl" ]; then
                 configure_wsl_network
@@ -1138,28 +1120,10 @@ manage_dria_node() {
                 display_status "此选项仅适用于WSL环境" "error"
             fi 
             ;;
-        [Dd])
-            if [ "$ENV_TYPE" = "wsl" ]; then
-                fix_wsl_dns
-            else
-                display_status "此选项仅适用于WSL环境" "error"
-            fi
-            ;;
-        [Ff])
-            if [ "$ENV_TYPE" = "wsl" ]; then
-                create_direct_connect_tool
-                display_status "超级修复工具已创建，可以使用 'dria-superfix' 命令启动" "success"
-                read -p "是否立即运行超级修复工具?(y/n): " run_superfix
-                if [[ $run_superfix == "y" || $run_superfix == "Y" ]]; then
-                    /usr/local/bin/dria-superfix
-                fi
-            else
-                display_status "此选项仅适用于WSL环境" "error"
-            fi
-            ;;
+        0) exit 0 ;;
         *) display_status "无效选项，请重试。" "error" ;;
     esac
-    read -n 1 -s -r -p "按任意键继续..."
+    read -n 1 -s -r -p "按任意键返回主菜单..."
 }
 
 # 检查网络连接
@@ -1582,14 +1546,6 @@ main_menu() {
             display_status "GitHub连接不可用，建议设置网络代理" "warning"
         fi
         
-        # 尝试下载并显示 logo，但设置超时避免卡住
-        if command -v curl &> /dev/null; then
-            curl -s --connect-timeout 3 --max-time 3 https://raw.githubusercontent.com/fishzone24/dria/main/logo.sh | bash 2>/dev/null || echo "DRIA 节点管理工具"
-            sleep 1
-        else
-            echo "DRIA 节点管理工具"
-        fi
-        
         echo -e "${MENU_COLOR}${BOLD}============================ Dria 节点管理工具 ============================${NORMAL}"
         echo -e "${MENU_COLOR}请选择操作:${NORMAL}"
         echo -e "${MENU_COLOR}1. 更新系统并安装依赖项${NORMAL}"
@@ -1602,16 +1558,17 @@ main_menu() {
         echo -e "${MENU_COLOR}8. 设置网络代理${NORMAL}"
         echo -e "${MENU_COLOR}9. 清除网络代理${NORMAL}"
         echo -e "${MENU_COLOR}H. Ollama修复工具${NORMAL}"
+        echo -e "${MENU_COLOR}D. DNS修复工具${NORMAL}"
+        echo -e "${MENU_COLOR}F. 超级修复工具${NORMAL}"
+        echo -e "${MENU_COLOR}I. 直接IP连接${NORMAL}"
         
         # WSL特定选项
         if [ "$ENV_TYPE" = "wsl" ]; then
             echo -e "${MENU_COLOR}W. WSL网络优化配置${NORMAL}"
-            echo -e "${MENU_COLOR}D. DNS修复工具${NORMAL}"
-            echo -e "${MENU_COLOR}F. 超级修复工具${NORMAL}"
         fi
         
         echo -e "${MENU_COLOR}0. 退出${NORMAL}"
-        read -p "请输入选项（0-9/H/W/D/F）: " OPTION
+        read -p "请输入选项（0-9/H/D/F/I/W）: " OPTION
 
         case $OPTION in
             1) setup_prerequisites ;;
@@ -1631,31 +1588,32 @@ main_menu() {
                 display_status "Ollama目录权限已修复" "success"
                 read -n 1 -s -r -p "按任意键继续..."
                 ;;
+            [Dd])
+                diagnose_network
+                read -n 1 -s -r -p "按任意键继续..."
+                ;;
+            [Ff])
+                create_superfix_tool
+                display_status "超级修复工具已创建，可以使用 'dria-superfix' 命令启动" "success"
+                read -p "是否立即运行超级修复工具?(y/n): " run_superfix
+                if [[ $run_superfix == "y" || $run_superfix == "Y" ]]; then
+                    /usr/local/bin/dria-superfix
+                fi
+                ;;
+            [Ii])
+                create_direct_connect_tool
+                display_status "直接IP连接工具已创建，可以使用 'dria-direct' 命令启动" "success"
+                read -p "是否立即运行直接IP连接?(y/n): " run_direct
+                if [[ $run_direct == "y" || $run_direct == "Y" ]]; then
+                    /usr/local/bin/dria-direct
+                fi
+                ;;
             [Ww]) 
                 if [ "$ENV_TYPE" = "wsl" ]; then
                     configure_wsl_network
                 else
                     display_status "此选项仅适用于WSL环境" "error"
                 fi 
-                ;;
-            [Dd])
-                if [ "$ENV_TYPE" = "wsl" ]; then
-                    fix_wsl_dns
-                else
-                    display_status "此选项仅适用于WSL环境" "error"
-                fi
-                ;;
-            [Ff])
-                if [ "$ENV_TYPE" = "wsl" ]; then
-                    create_direct_connect_tool
-                    display_status "超级修复工具已创建，可以使用 'dria-superfix' 命令启动" "success"
-                    read -p "是否立即运行超级修复工具?(y/n): " run_superfix
-                    if [[ $run_superfix == "y" || $run_superfix == "Y" ]]; then
-                        /usr/local/bin/dria-superfix
-                    fi
-                else
-                    display_status "此选项仅适用于WSL环境" "error"
-                fi
                 ;;
             0) exit 0 ;;
             *) display_status "无效选项，请重试。" "error" ;;
