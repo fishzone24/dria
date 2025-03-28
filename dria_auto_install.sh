@@ -445,7 +445,55 @@ EOF
     return 0
 }
 
-# 添加直接IP连接工具
+# 网络诊断和修复函数
+diagnose_network() {
+    display_status "开始网络诊断..." "info"
+    
+    # 检查防火墙状态
+    if command -v ufw &> /dev/null; then
+        if ufw status | grep -q "Status: active"; then
+            display_status "检测到防火墙已启用，正在检查端口..." "warning"
+            # 检查必要的端口
+            for port in 4001 1337 11434; do
+                if ! ufw status | grep -q "$port"; then
+                    display_status "端口 $port 未开放，正在添加规则..." "info"
+                    ufw allow $port/tcp
+                    ufw allow $port/udp
+                fi
+            done
+        fi
+    fi
+    
+    # 检查系统DNS配置
+    if [ ! -f "/etc/resolv.conf" ] || ! grep -q "nameserver 8.8.8.8" "/etc/resolv.conf"; then
+        display_status "正在优化DNS配置..." "info"
+        echo "nameserver 8.8.8.8" > /etc/resolv.conf
+        echo "nameserver 1.1.1.1" >> /etc/resolv.conf
+    fi
+    
+    # 检查hosts文件
+    if ! grep -q "node1.dria.co" "/etc/hosts"; then
+        display_status "正在添加Dria节点IP映射..." "info"
+        cat >> /etc/hosts << EOF
+34.145.16.76 node1.dria.co
+34.42.109.93 node2.dria.co
+34.42.43.172 node3.dria.co
+35.200.247.78 node4.dria.co
+34.92.171.75 node5.dria.co
+EOF
+    fi
+    
+    # 检查Docker网络
+    if command -v docker &> /dev/null; then
+        display_status "正在检查Docker网络配置..." "info"
+        docker network prune -f
+        docker system prune -f
+    fi
+    
+    display_status "网络诊断完成" "success"
+}
+
+# 创建直接IP连接工具
 create_direct_connect_tool() {
     display_status "正在创建直接IP连接工具..." "info"
     
