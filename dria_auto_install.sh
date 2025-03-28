@@ -1106,7 +1106,9 @@ manage_dria_node() {
     echo -e "${MENU_COLOR}6. 更新 Dria 节点${NORMAL}"
     echo -e "${MENU_COLOR}7. 卸载 Dria 节点${NORMAL}"
     echo -e "${MENU_COLOR}8. 返回主菜单${NORMAL}"
-    read -p "请输入选项（1-8）: " OPTION
+    echo -e "${MENU_COLOR}9. 设置网络代理${NORMAL}"
+    echo -e "${MENU_COLOR}H. Ollama修复工具${NORMAL}"
+    read -p "请输入选项（1-8/9/H）: " OPTION
 
     case $OPTION in
         1) dkn-compute-launcher start ;;
@@ -1117,6 +1119,41 @@ manage_dria_node() {
         6) dkn-compute-launcher update ;;
         7) dkn-compute-launcher uninstall ;;
         8) return ;;
+        9) setup_proxy ;;
+        [Hh])
+            display_status "正在修复Ollama..." "info"
+            mkdir -p /root/.ollama/models
+            chown -R root:root /root/.ollama
+            chmod -R 755 /root/.ollama
+            display_status "Ollama目录权限已修复" "success"
+            read -n 1 -s -r -p "按任意键继续..."
+            ;;
+        [Ww]) 
+            if [ "$ENV_TYPE" = "wsl" ]; then
+                configure_wsl_network
+            else
+                display_status "此选项仅适用于WSL环境" "error"
+            fi 
+            ;;
+        [Dd])
+            if [ "$ENV_TYPE" = "wsl" ]; then
+                fix_wsl_dns
+            else
+                display_status "此选项仅适用于WSL环境" "error"
+            fi
+            ;;
+        [Ff])
+            if [ "$ENV_TYPE" = "wsl" ]; then
+                create_direct_connect_tool
+                display_status "超级修复工具已创建，可以使用 'dria-superfix' 命令启动" "success"
+                read -p "是否立即运行超级修复工具?(y/n): " run_superfix
+                if [[ $run_superfix == "y" || $run_superfix == "Y" ]]; then
+                    /usr/local/bin/dria-superfix
+                fi
+            else
+                display_status "此选项仅适用于WSL环境" "error"
+            fi
+            ;;
         *) display_status "无效选项，请重试。" "error" ;;
     esac
     read -n 1 -s -r -p "按任意键继续..."
@@ -1561,17 +1598,17 @@ main_menu() {
         echo -e "${MENU_COLOR}7. 检查网络连接${NORMAL}"
         echo -e "${MENU_COLOR}8. 设置网络代理${NORMAL}"
         echo -e "${MENU_COLOR}9. 清除网络代理${NORMAL}"
+        echo -e "${MENU_COLOR}H. Ollama修复工具${NORMAL}"
         
         # WSL特定选项
         if [ "$ENV_TYPE" = "wsl" ]; then
             echo -e "${MENU_COLOR}W. WSL网络优化配置${NORMAL}"
             echo -e "${MENU_COLOR}D. DNS修复工具${NORMAL}"
             echo -e "${MENU_COLOR}F. 超级修复工具${NORMAL}"
-            echo -e "${MENU_COLOR}H. Ollama修复工具${NORMAL}"
         fi
         
         echo -e "${MENU_COLOR}0. 退出${NORMAL}"
-        read -p "请输入选项（0-9/W/D/F/H）: " OPTION
+        read -p "请输入选项（0-9/H/W/D/F）: " OPTION
 
         case $OPTION in
             1) setup_prerequisites ;;
@@ -1583,6 +1620,14 @@ main_menu() {
             7) check_network ;;
             8) setup_proxy ;;
             9) clear_proxy ;;
+            [Hh])
+                display_status "正在修复Ollama..." "info"
+                mkdir -p /root/.ollama/models
+                chown -R root:root /root/.ollama
+                chmod -R 755 /root/.ollama
+                display_status "Ollama目录权限已修复" "success"
+                read -n 1 -s -r -p "按任意键继续..."
+                ;;
             [Ww]) 
                 if [ "$ENV_TYPE" = "wsl" ]; then
                     configure_wsl_network
@@ -1608,14 +1653,6 @@ main_menu() {
                 else
                     display_status "此选项仅适用于WSL环境" "error"
                 fi
-                ;;
-            [Hh])
-                display_status "正在修复Ollama..." "info"
-                mkdir -p /root/.ollama/models
-                chown -R root:root /root/.ollama
-                chmod -R 755 /root/.ollama
-                display_status "Ollama目录权限已修复" "success"
-                read -n 1 -s -r -p "按任意键继续..."
                 ;;
             0) exit 0 ;;
             *) display_status "无效选项，请重试。" "error" ;;
