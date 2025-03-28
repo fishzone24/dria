@@ -449,7 +449,7 @@ EOF
 create_direct_connect_tool() {
     display_status "正在创建直接IP连接工具..." "info"
     
-    # 创建direct_network_config.json
+    # 创建settings.json
     mkdir -p /root/.dria
     cat > /root/.dria/settings.json << EOF
 {
@@ -457,16 +457,14 @@ create_direct_connect_tool() {
         "connection_timeout": 300,
         "direct_connection_timeout": 20000,
         "relay_connection_timeout": 60000,
-    "external_multiaddrs": [
-        "/ip4/0.0.0.0/tcp/4001"
-    ],
-    "bootstrap_nodes": [
-        "/ip4/34.145.16.76/tcp/4001/p2p/QmXZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
-        "/ip4/34.42.109.93/tcp/4001/p2p/QmYZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
-        "/ip4/34.42.43.172/tcp/4001/p2p/QmZZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
-        "/ip4/35.200.247.78/tcp/4001/p2p/QmWZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
-        "/ip4/34.92.171.75/tcp/4001/p2p/QmVZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV"
-    ]
+        "bootstrap_nodes": [
+            "/ip4/34.145.16.76/tcp/4001/p2p/QmXZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
+            "/ip4/34.42.109.93/tcp/4001/p2p/QmYZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
+            "/ip4/34.42.43.172/tcp/4001/p2p/QmZZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
+            "/ip4/35.200.247.78/tcp/4001/p2p/QmWZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
+            "/ip4/34.92.171.75/tcp/4001/p2p/QmVZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV"
+        ]
+    }
 }
 EOF
     
@@ -474,8 +472,7 @@ EOF
     cat > /usr/local/bin/dria-direct << EOF
 #!/bin/bash
 export DKN_LOG=debug
-export DKN_NETWORK_CONFIG=/root/.dria/direct_network_config.json
-dkn-compute-launcher start --network-config \$DKN_NETWORK_CONFIG
+dkn-compute-launcher start
 EOF
     chmod +x /usr/local/bin/dria-direct
     
@@ -505,36 +502,26 @@ fi
 
 # 创建优化的网络配置
 mkdir -p /root/.dria
-cat > /root/.dria/network_config.json << 'EOL'
-{
-    "external_multiaddrs": [
-        "/ip4/0.0.0.0/tcp/4001"
-    ],
-    "bootstrap_nodes": [
-        "/ip4/34.145.16.76/tcp/4001/p2p/QmXZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
-        "/ip4/34.42.109.93/tcp/4001/p2p/QmYZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
-        "/ip4/34.42.43.172/tcp/4001/p2p/QmZZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
-        "/ip4/35.200.247.78/tcp/4001/p2p/QmWZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
-        "/ip4/34.92.171.75/tcp/4001/p2p/QmVZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV"
-    ]
-}
-EOL
-
-# 创建优化的settings.json
 cat > /root/.dria/settings.json << 'EOL'
 {
     "network": {
         "connection_timeout": 300,
         "direct_connection_timeout": 20000,
-        "relay_connection_timeout": 60000
+        "relay_connection_timeout": 60000,
+        "bootstrap_nodes": [
+            "/ip4/34.145.16.76/tcp/4001/p2p/QmXZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
+            "/ip4/34.42.109.93/tcp/4001/p2p/QmYZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
+            "/ip4/34.42.43.172/tcp/4001/p2p/QmZZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
+            "/ip4/35.200.247.78/tcp/4001/p2p/QmWZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
+            "/ip4/34.92.171.75/tcp/4001/p2p/QmVZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV"
+        ]
     }
 }
 EOL
 
 # 启动节点
 export DKN_LOG=debug
-export DKN_NETWORK_CONFIG=/root/.dria/network_config.json
-dkn-compute-launcher start --network-config \$DKN_NETWORK_CONFIG
+dkn-compute-launcher start
 EOF
     
     chmod +x /usr/local/bin/dria-superfix
