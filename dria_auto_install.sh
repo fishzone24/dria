@@ -209,6 +209,15 @@ install_docker() {
 install_ollama() {
     display_status "正在安装 Ollama..." "info"
     
+    # 创建并设置Ollama目录权限
+    setup_ollama_dirs() {
+        display_status "设置Ollama目录权限..." "info"
+        mkdir -p /root/.ollama/models
+        chown -R root:root /root/.ollama
+        chmod -R 755 /root/.ollama
+        display_status "Ollama目录权限设置完成" "success"
+    }
+    
     # 检查是否在WSL环境中
     if [ "$ENV_TYPE" = "wsl" ]; then
         display_status "WSL环境检测到，正在使用特定的Ollama安装方法..." "info"
@@ -233,6 +242,9 @@ install_ollama() {
         # 移动到系统路径
         mv ollama /usr/local/bin/
         
+        # 设置目录权限
+        setup_ollama_dirs
+        
         # 清理临时目录
         cd "$HOME"
         rm -rf "$TMP_DIR"
@@ -240,7 +252,14 @@ install_ollama() {
         display_status "Ollama 安装成功。请手动运行 'ollama serve' 来启动Ollama服务。" "success"
     else
         # 标准安装方法
-        curl -fsSL https://ollama.com/install.sh | sh && display_status "Ollama 安装成功。" "success" || display_status "Ollama 安装失败。" "error"
+        curl -fsSL https://ollama.com/install.sh | sh
+        if [ $? -eq 0 ]; then
+            # 设置目录权限
+            setup_ollama_dirs
+            display_status "Ollama 安装成功。" "success"
+        else
+            display_status "Ollama 安装失败。" "error"
+        fi
     fi
 }
 
@@ -1548,10 +1567,11 @@ main_menu() {
             echo -e "${MENU_COLOR}W. WSL网络优化配置${NORMAL}"
             echo -e "${MENU_COLOR}D. DNS修复工具${NORMAL}"
             echo -e "${MENU_COLOR}F. 超级修复工具${NORMAL}"
+            echo -e "${MENU_COLOR}H. Ollama修复工具${NORMAL}"
         fi
         
         echo -e "${MENU_COLOR}0. 退出${NORMAL}"
-        read -p "请输入选项（0-9/W/D/F）: " OPTION
+        read -p "请输入选项（0-9/W/D/F/H）: " OPTION
 
         case $OPTION in
             1) setup_prerequisites ;;
@@ -1588,6 +1608,14 @@ main_menu() {
                 else
                     display_status "此选项仅适用于WSL环境" "error"
                 fi
+                ;;
+            [Hh])
+                display_status "正在修复Ollama..." "info"
+                mkdir -p /root/.ollama/models
+                chown -R root:root /root/.ollama
+                chmod -R 755 /root/.ollama
+                display_status "Ollama目录权限已修复" "success"
+                read -n 1 -s -r -p "按任意键继续..."
                 ;;
             0) exit 0 ;;
             *) display_status "无效选项，请重试。" "error" ;;
