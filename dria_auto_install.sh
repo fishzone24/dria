@@ -89,6 +89,9 @@ if [[ $EUID -ne 0 ]]; then
     exit 1
 fi
 
+# 确保脚本有执行权限
+chmod +x "$0"
+
 # 更新系统并安装依赖项
 setup_prerequisites() {
     display_status "检查并安装所需的系统依赖项..." "info"
