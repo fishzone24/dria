@@ -1657,7 +1657,7 @@ main_menu() {
         
         # WSL特定选项
         if [ "$ENV_TYPE" = "wsl" ]; then
-            echo -e "${MENU_COLOR}W. WSL网络优化配置${NORMAL}"
+            echo -e "${MENU_COLOR}W. WSL网络修复工具${NORMAL}"
         fi
         
         echo -e "${MENU_COLOR}0. 退出${NORMAL}"
@@ -1707,7 +1707,10 @@ main_menu() {
                 ;;
             [Ww]) 
                 if [ "$ENV_TYPE" = "wsl" ]; then
-                    configure_wsl_network
+                    display_status "正在运行WSL网络修复工具..." "info"
+                    fix_wsl_network
+                    display_status "WSL网络修复完成" "success"
+                    read -n 1 -s -r -p "按任意键继续..."
                 else
                     display_status "此选项仅适用于WSL环境" "error"
                 fi 
@@ -1724,3 +1727,10 @@ initialize      # 快速初始化
 init_network_check  # 网络检测在后台进行
 display_info
 main_menu
+
+# WSL网络修复功能
+fix_wsl_network() {
+    # 检查是否在WSL环境中
+    if ! grep -qi "microsoft" /proc/version && ! grep -qi "microsoft" /proc/sys/kernel/osrelease; then
+        display_status "此功能仅适用于WSL环境" "error"
+        return 1
