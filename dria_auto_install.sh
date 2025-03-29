@@ -605,7 +605,9 @@ if [ "$IS_WSL" = true ]; then
             "/ip4/34.42.109.93/tcp/4001/p2p/QmYZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
             "/ip4/34.42.43.172/tcp/4001/p2p/QmZZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
             "/ip4/35.200.247.78/tcp/4001/p2p/QmWZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
-            "/ip4/34.92.171.75/tcp/4001/p2p/QmVZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV"
+            "/ip4/34.92.171.75/tcp/4001/p2p/QmVZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
+            "/ip4/98.85.74.179/tcp/4001/p2p/16Uiu2HAmH4YGRWuJSvo5bxdShozKSve1WaZMGzAr3GiNNzadsdaN",
+            "/ip4/52.73.119.21/tcp/4001/p2p/16Uiu2HAmAYyZ69AXRfVHvp887ZTt5R2hm3ipHRJcDnaVCr3KB9qM"
         ],
         "listen_addresses": [
             "/ip4/0.0.0.0/tcp/4001",
@@ -618,7 +620,36 @@ if [ "$IS_WSL" = true ]; then
         "enable_relay": true,
         "relay_discovery": true,
         "relay_connection_timeout_ms": 60000,
-        "direct_connection_timeout_ms": 20000
+        "direct_connection_timeout_ms": 20000,
+        "connection_idle_timeout": 300,
+        "mesh_size": 8,
+        "target_mesh_size": 8,
+        "min_mesh_size": 4,
+        "max_mesh_size": 12,
+        "heartbeat_interval": 1000,
+        "heartbeat_timeout": 5000,
+        "gossip_factor": 0.25,
+        "d": 6,
+        "d_low": 4,
+        "d_high": 8,
+        "d_score": 4,
+        "d_out": 2,
+        "gossip_history_length": 5,
+        "gossip_history_gossip": 3,
+        "opportunistic_graft_ticks": 60,
+        "opportunistic_graft_peer_threshold": 0.1,
+        "graft_flood_threshold": 5,
+        "prune_peers": 16,
+        "prune_backoff": 1,
+        "unsubscribe_backoff": 60,
+        "connectors": 8,
+        "max_connections": 50,
+        "min_connections": 10,
+        "connection_timeout_ms": 10000,
+        "connection_retry_delay_ms": 1000,
+        "connection_retry_attempts": 5,
+        "connection_retry_factor": 1.5,
+        "connection_retry_max_delay_ms": 30000
     }
 }
 EOL
@@ -635,7 +666,9 @@ else
             "/ip4/34.42.109.93/tcp/4001/p2p/QmYZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
             "/ip4/34.42.43.172/tcp/4001/p2p/QmZZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
             "/ip4/35.200.247.78/tcp/4001/p2p/QmWZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
-            "/ip4/34.92.171.75/tcp/4001/p2p/QmVZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV"
+            "/ip4/34.92.171.75/tcp/4001/p2p/QmVZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
+            "/ip4/98.85.74.179/tcp/4001/p2p/16Uiu2HAmH4YGRWuJSvo5bxdShozKSve1WaZMGzAr3GiNNzadsdaN",
+            "/ip4/52.73.119.21/tcp/4001/p2p/16Uiu2HAmAYyZ69AXRfVHvp887ZTt5R2hm3ipHRJcDnaVCr3KB9qM"
         ],
         "listen_addresses": [
             "/ip4/0.0.0.0/tcp/4001",
@@ -644,7 +677,40 @@ else
         "external_addresses": [
             "/ip4/$LOCAL_IP/tcp/4001",
             "/ip4/$LOCAL_IP/udp/4001/quic-v1"
-        ]
+        ],
+        "enable_relay": true,
+        "relay_discovery": true,
+        "relay_connection_timeout_ms": 60000,
+        "direct_connection_timeout_ms": 20000,
+        "connection_idle_timeout": 300,
+        "mesh_size": 8,
+        "target_mesh_size": 8,
+        "min_mesh_size": 4,
+        "max_mesh_size": 12,
+        "heartbeat_interval": 1000,
+        "heartbeat_timeout": 5000,
+        "gossip_factor": 0.25,
+        "d": 6,
+        "d_low": 4,
+        "d_high": 8,
+        "d_score": 4,
+        "d_out": 2,
+        "gossip_history_length": 5,
+        "gossip_history_gossip": 3,
+        "opportunistic_graft_ticks": 60,
+        "opportunistic_graft_peer_threshold": 0.1,
+        "graft_flood_threshold": 5,
+        "prune_peers": 16,
+        "prune_backoff": 1,
+        "unsubscribe_backoff": 60,
+        "connectors": 8,
+        "max_connections": 50,
+        "min_connections": 10,
+        "connection_timeout_ms": 10000,
+        "connection_retry_delay_ms": 1000,
+        "connection_retry_attempts": 5,
+        "connection_retry_factor": 1.5,
+        "connection_retry_max_delay_ms": 30000
     }
 }
 EOL
@@ -1734,3 +1800,5 @@ fix_wsl_network() {
     if ! grep -qi "microsoft" /proc/version && ! grep -qi "microsoft" /proc/sys/kernel/osrelease; then
         display_status "此功能仅适用于WSL环境" "error"
         return 1
+    fi
+}
