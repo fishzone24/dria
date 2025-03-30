@@ -1634,9 +1634,26 @@ init_network_check() {
 # 显示脚本信息
 display_info() {
     clear
-    echo -e "${INFO_COLOR}${BOLD}=========================================================================${NORMAL}"
-    echo -e "${INFO_COLOR}${BOLD}                     Dria 计算节点自动安装脚本                           ${NORMAL}"
-    echo -e "${INFO_COLOR}${BOLD}=========================================================================${NORMAL}"
+    # 添加署名信息
+    cat << "EOF"
+
+   __   _         _                                    ___    _  _   
+  / _| (_)       | |                                  |__ \  | || |  
+ | |_   _   ___  | |__    ____   ___    _ __     ___     ) | | || |_ 
+ |  _| | | / __| | '_ \  |_  /  / _ \  | '_ \   / _ \   / /  |__   _|
+ | |   | | \__ \ | | | |  / /  | (_) | | | | | |  __/  / /_     | |  
+ |_|   |_| |___/ |_| |_| /___|  \___/  |_| |_|  \___| |____|    |_|  
+                                                                     
+                                                                     
+
+                                                                                                                                  
+
+EOF
+    echo -e "${BLUE}==================================================================${RESET}"
+    echo -e "${GREEN}Dria 节点一键管理脚本${RESET}"
+    echo -e "${YELLOW}脚本作者: fishzone24 - 推特: https://x.com/fishzone24${RESET}"
+    echo -e "${YELLOW}此脚本为免费开源脚本，如有问题请提交 issue${RESET}"
+    echo -e "${BLUE}==================================================================${RESET}"
     echo -e ""
     echo -e "${INFO_COLOR}此脚本将帮助您在 Ubuntu 系统上自动安装和配置 Dria 计算节点。${NORMAL}"
     
@@ -1688,6 +1705,27 @@ display_info() {
 main_menu() {
     while true; do
         clear
+        # 添加署名信息
+        cat << "EOF"
+
+   __   _         _                                    ___    _  _   
+  / _| (_)       | |                                  |__ \  | || |  
+ | |_   _   ___  | |__    ____   ___    _ __     ___     ) | | || |_ 
+ |  _| | | / __| | '_ \  |_  /  / _ \  | '_ \   / _ \   / /  |__   _|
+ | |   | | \__ \ | | | |  / /  | (_) | | | | | |  __/  / /_     | |  
+ |_|   |_| |___/ |_| |_| /___|  \___/  |_| |_|  \___| |____|    |_|  
+                                                                     
+                                                                     
+
+                                                                                                                                  
+
+EOF
+        echo -e "${BLUE}==================================================================${RESET}"
+        echo -e "${GREEN}Dria 节点一键管理脚本${RESET}"
+        echo -e "${YELLOW}脚本作者: fishzone24 - 推特: https://x.com/fishzone24${RESET}"
+        echo -e "${YELLOW}此脚本为免费开源脚本，如有问题请提交 issue${RESET}"
+        echo -e "${BLUE}==================================================================${RESET}"
+        
         # 显示运行环境
         if [ "$ENV_TYPE" = "wsl" ]; then
             display_status "当前运行在Windows Subsystem for Linux (WSL)环境中" "info"
@@ -1740,12 +1778,8 @@ main_menu() {
             8) setup_proxy ;;
             9) clear_proxy ;;
             [Hh])
-                display_status "正在修复Ollama..." "info"
-                mkdir -p /root/.ollama/models
-                chown -R root:root /root/.ollama
-                chmod -R 755 /root/.ollama
-                display_status "Ollama目录权限已修复" "success"
-                read -n 1 -s -r -p "按任意键继续..."
+                display_status "正在运行 Ollama 修复工具..." "info"
+                fix_ollama
                 ;;
             [Dd])
                 display_status "正在运行DNS修复工具..." "info"
@@ -1801,4 +1835,86 @@ fix_wsl_network() {
         display_status "此功能仅适用于WSL环境" "error"
         return 1
     fi
+}
+
+# 添加 Ollama 修复功能
+fix_ollama() {
+    display_status "正在修复 Ollama..." "info"
+    
+    # 检查 Ollama 是否在 Docker 中运行
+    if docker ps | grep -q "ollama/ollama"; then
+        display_status "检测到 Ollama 正在 Docker 中运行" "info"
+        OLLAMA_CONTAINER=$(docker ps | grep "ollama/ollama" | awk '{print $1}')
+        
+        # 检查容器内的目录权限
+        display_status "检查 Ollama 容器内的目录权限..." "info"
+        if ! docker exec $OLLAMA_CONTAINER ls /root/.ollama/models &>/dev/null; then
+            display_status "正在修复 Ollama 容器内的目录权限..." "info"
+            docker exec $OLLAMA_CONTAINER mkdir -p /root/.ollama/models
+            docker exec $OLLAMA_CONTAINER chown -R root:root /root/.ollama
+            docker exec $OLLAMA_CONTAINER chmod -R 755 /root/.ollama
+        fi
+        
+        # 重启 Ollama 容器以确保权限生效
+        display_status "重启 Ollama 容器..." "info"
+        docker restart $OLLAMA_CONTAINER
+        
+        # 等待 Ollama 服务启动
+        display_status "等待 Ollama 服务启动..." "info"
+        sleep 5
+        
+        # 测试 Ollama 连接
+        if curl -s http://127.0.0.1:11434/api/version &>/dev/null; then
+            display_status "Ollama 服务已恢复正常" "success"
+        else
+            display_status "Ollama 服务可能仍有问题，请检查日志" "warning"
+            docker logs $OLLAMA_CONTAINER
+        fi
+    else
+        # 如果 Ollama 不在 Docker 中运行，检查本地安装
+        display_status "检查本地 Ollama 安装..." "info"
+        if command -v ollama &>/dev/null; then
+            display_status "检测到本地 Ollama 安装" "info"
+            
+            # 创建并设置目录权限
+            mkdir -p /root/.ollama/models
+            chown -R root:root /root/.ollama
+            chmod -R 755 /root/.ollama
+            
+            # 重启 Ollama 服务
+            if systemctl is-active --quiet ollama; then
+                display_status "重启 Ollama 服务..." "info"
+                systemctl restart ollama
+                sleep 5
+            else
+                display_status "启动 Ollama 服务..." "info"
+                systemctl start ollama
+                sleep 5
+            fi
+            
+            # 测试 Ollama 连接
+            if curl -s http://127.0.0.1:11434/api/version &>/dev/null; then
+                display_status "Ollama 服务已恢复正常" "success"
+            else
+                display_status "Ollama 服务可能仍有问题，请检查日志" "warning"
+                journalctl -u ollama -n 50
+            fi
+        else
+            display_status "未检测到 Ollama 安装" "error"
+            read -p "是否要安装 Ollama?(y/n): " install_ollama
+            if [[ $install_ollama == "y" || $install_ollama == "Y" ]]; then
+                install_ollama
+            fi
+        fi
+    fi
+    
+    # 创建 .env 文件
+    display_status "创建 .env 文件..." "info"
+    cat > /root/.dria/.env << EOF
+OLLAMA_HOST=http://127.0.0.1:11434
+OLLAMA_MODELS=Llama3_2_1B
+EOF
+    
+    display_status "Ollama 修复完成" "success"
+    read -n 1 -s -r -p "按任意键继续..."
 }
