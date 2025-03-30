@@ -92,6 +92,75 @@ fi
 # 确保脚本有执行权限
 chmod +x "$0"
 
+# 在setup_prerequisites函数之前添加
+# Ollama Docker修复函数
+fix_ollama_docker() {
+    display_status "Ollama Docker环境修复工具" "info"
+    
+    # 检查Docker是否运行
+    if ! docker ps &>/dev/null; then
+        display_status "Docker服务未运行" "error"
+        return 1
+    fi
+    
+    # 检查Ollama容器是否运行
+    if ! docker ps | grep -q "ollama"; then
+        display_status "未检测到运行中的Ollama容器" "error"
+        return 1
+    fi
+    
+    # 创建必要的目录结构
+    display_status "创建Ollama必要目录..." "info"
+    mkdir -p /root/.ollama/models
+    chmod -R 755 /root/.ollama
+    chown -R root:root /root/.ollama
+    
+    # 获取Ollama容器ID
+    OLLAMA_CONTAINER=$(docker ps | grep ollama | awk '{print $1}')
+    
+    if [ -z "$OLLAMA_CONTAINER" ]; then
+        display_status "无法获取Ollama容器ID" "error"
+        return 1
+    fi
+    
+    display_status "检测到Ollama容器: $OLLAMA_CONTAINER" "info"
+    
+    # 创建临时脚本
+    cat > /tmp/fix_ollama.sh << 'EOF'
+#!/bin/bash
+mkdir -p /root/.ollama/models
+chmod -R 755 /root/.ollama
+chown -R root:root /root/.ollama
+EOF
+    chmod +x /tmp/fix_ollama.sh
+    
+    # 将脚本复制到容器内并执行
+    display_status "在Ollama容器内执行修复..." "info"
+    docker cp /tmp/fix_ollama.sh $OLLAMA_CONTAINER:/tmp/
+    docker exec $OLLAMA_CONTAINER /bin/bash /tmp/fix_ollama.sh
+    
+    # 重启Ollama容器
+    display_status "重启Ollama容器..." "info"
+    docker restart $OLLAMA_CONTAINER
+    
+    # 等待Ollama服务重新启动
+    sleep 5
+    
+    # 检查Ollama服务是否正常
+    if curl -s http://localhost:11434/api/tags >/dev/null; then
+        display_status "Ollama服务已恢复正常" "success"
+    else
+        display_status "Ollama服务可能仍有问题，请检查Docker日志" "warning"
+        echo "可以使用以下命令查看日志："
+        echo "docker logs $OLLAMA_CONTAINER"
+    fi
+    
+    # 清理临时文件
+    rm -f /tmp/fix_ollama.sh
+    
+    return 0
+}
+
 # 更新系统并安装依赖项
 setup_prerequisites() {
     display_status "检查并安装所需的系统依赖项..." "info"
@@ -1845,72 +1914,4 @@ fix_wsl_network() {
         display_status "此功能仅适用于WSL环境" "error"
         return 1
     fi
-}
-
-# 添加Ollama Docker修复函数（添加在其他函数定义之后，main_menu之前）
-fix_ollama_docker() {
-    display_status "Ollama Docker环境修复工具" "info"
-    
-    # 检查Docker是否运行
-    if ! docker ps &>/dev/null; then
-        display_status "Docker服务未运行" "error"
-        return 1
-    fi
-    
-    # 检查Ollama容器是否运行
-    if ! docker ps | grep -q "ollama"; then
-        display_status "未检测到运行中的Ollama容器" "error"
-        return 1
-    fi
-    
-    # 创建必要的目录结构
-    display_status "创建Ollama必要目录..." "info"
-    mkdir -p /root/.ollama/models
-    chmod -R 755 /root/.ollama
-    chown -R root:root /root/.ollama
-    
-    # 获取Ollama容器ID
-    OLLAMA_CONTAINER=$(docker ps | grep ollama | awk '{print $1}')
-    
-    if [ -z "$OLLAMA_CONTAINER" ]; then
-        display_status "无法获取Ollama容器ID" "error"
-        return 1
-    fi
-    
-    display_status "检测到Ollama容器: $OLLAMA_CONTAINER" "info"
-    
-    # 创建临时脚本
-    cat > /tmp/fix_ollama.sh << 'EOF'
-#!/bin/bash
-mkdir -p /root/.ollama/models
-chmod -R 755 /root/.ollama
-chown -R root:root /root/.ollama
-EOF
-    chmod +x /tmp/fix_ollama.sh
-    
-    # 将脚本复制到容器内并执行
-    display_status "在Ollama容器内执行修复..." "info"
-    docker cp /tmp/fix_ollama.sh $OLLAMA_CONTAINER:/tmp/
-    docker exec $OLLAMA_CONTAINER /bin/bash /tmp/fix_ollama.sh
-    
-    # 重启Ollama容器
-    display_status "重启Ollama容器..." "info"
-    docker restart $OLLAMA_CONTAINER
-    
-    # 等待Ollama服务重新启动
-    sleep 5
-    
-    # 检查Ollama服务是否正常
-    if curl -s http://localhost:11434/api/tags >/dev/null; then
-        display_status "Ollama服务已恢复正常" "success"
-    else
-        display_status "Ollama服务可能仍有问题，请检查Docker日志" "warning"
-        echo "可以使用以下命令查看日志："
-        echo "docker logs $OLLAMA_CONTAINER"
-    fi
-    
-    # 清理临时文件
-    rm -f /tmp/fix_ollama.sh
-    
-    return 0
 }
