@@ -92,7 +92,6 @@ fi
 # 确保脚本有执行权限
 chmod +x "$0"
 
-# 在setup_prerequisites函数之前添加
 # Ollama Docker修复函数
 fix_ollama_docker() {
     display_status "Ollama Docker环境修复工具" "info"
