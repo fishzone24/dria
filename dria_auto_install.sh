@@ -1755,6 +1755,7 @@ EOF
         echo -e "${MENU_COLOR}8. 设置网络代理${NORMAL}"
         echo -e "${MENU_COLOR}9. 清除网络代理${NORMAL}"
         echo -e "${MENU_COLOR}H. Ollama修复工具${NORMAL}"
+        echo -e "${MENU_COLOR}O. Ollama Docker修复${NORMAL}"  # 添加新选项
         echo -e "${MENU_COLOR}D. DNS修复工具${NORMAL}"
         echo -e "${MENU_COLOR}F. 超级修复工具${NORMAL}"
         echo -e "${MENU_COLOR}I. 直接IP连接${NORMAL}"
@@ -1765,7 +1766,7 @@ EOF
         fi
         
         echo -e "${MENU_COLOR}0. 退出${NORMAL}"
-        read -p "请输入选项（0-9/H/D/F/I/W）: " OPTION
+        read -p "请输入选项（0-9/H/O/D/F/I/W）: " OPTION  # 更新提示
 
         case $OPTION in
             1) setup_prerequisites ;;
@@ -1778,8 +1779,17 @@ EOF
             8) setup_proxy ;;
             9) clear_proxy ;;
             [Hh])
-                display_status "正在运行 Ollama 修复工具..." "info"
-                fix_ollama
+                display_status "正在修复Ollama..." "info"
+                mkdir -p /root/.ollama/models
+                chown -R root:root /root/.ollama
+                chmod -R 755 /root/.ollama
+                display_status "Ollama目录权限已修复" "success"
+                read -n 1 -s -r -p "按任意键继续..."
+                ;;
+            [Oo])
+                display_status "正在运行Ollama Docker修复工具..." "info"
+                fix_ollama_docker
+                read -n 1 -s -r -p "按任意键继续..."
                 ;;
             [Dd])
                 display_status "正在运行DNS修复工具..." "info"
@@ -1837,84 +1847,70 @@ fix_wsl_network() {
     fi
 }
 
-# 添加 Ollama 修复功能
-fix_ollama() {
-    display_status "正在修复 Ollama..." "info"
+# 添加Ollama Docker修复函数（添加在其他函数定义之后，main_menu之前）
+fix_ollama_docker() {
+    display_status "Ollama Docker环境修复工具" "info"
     
-    # 检查 Ollama 是否在 Docker 中运行
-    if docker ps | grep -q "ollama/ollama"; then
-        display_status "检测到 Ollama 正在 Docker 中运行" "info"
-        OLLAMA_CONTAINER=$(docker ps | grep "ollama/ollama" | awk '{print $1}')
-        
-        # 检查容器内的目录权限
-        display_status "检查 Ollama 容器内的目录权限..." "info"
-        if ! docker exec $OLLAMA_CONTAINER ls /root/.ollama/models &>/dev/null; then
-            display_status "正在修复 Ollama 容器内的目录权限..." "info"
-            docker exec $OLLAMA_CONTAINER mkdir -p /root/.ollama/models
-            docker exec $OLLAMA_CONTAINER chown -R root:root /root/.ollama
-            docker exec $OLLAMA_CONTAINER chmod -R 755 /root/.ollama
-        fi
-        
-        # 重启 Ollama 容器以确保权限生效
-        display_status "重启 Ollama 容器..." "info"
-        docker restart $OLLAMA_CONTAINER
-        
-        # 等待 Ollama 服务启动
-        display_status "等待 Ollama 服务启动..." "info"
-        sleep 5
-        
-        # 测试 Ollama 连接
-        if curl -s http://127.0.0.1:11434/api/version &>/dev/null; then
-            display_status "Ollama 服务已恢复正常" "success"
-        else
-            display_status "Ollama 服务可能仍有问题，请检查日志" "warning"
-            docker logs $OLLAMA_CONTAINER
-        fi
-    else
-        # 如果 Ollama 不在 Docker 中运行，检查本地安装
-        display_status "检查本地 Ollama 安装..." "info"
-        if command -v ollama &>/dev/null; then
-            display_status "检测到本地 Ollama 安装" "info"
-            
-            # 创建并设置目录权限
-            mkdir -p /root/.ollama/models
-            chown -R root:root /root/.ollama
-            chmod -R 755 /root/.ollama
-            
-            # 重启 Ollama 服务
-            if systemctl is-active --quiet ollama; then
-                display_status "重启 Ollama 服务..." "info"
-                systemctl restart ollama
-                sleep 5
-            else
-                display_status "启动 Ollama 服务..." "info"
-                systemctl start ollama
-                sleep 5
-            fi
-            
-            # 测试 Ollama 连接
-            if curl -s http://127.0.0.1:11434/api/version &>/dev/null; then
-                display_status "Ollama 服务已恢复正常" "success"
-            else
-                display_status "Ollama 服务可能仍有问题，请检查日志" "warning"
-                journalctl -u ollama -n 50
-            fi
-        else
-            display_status "未检测到 Ollama 安装" "error"
-            read -p "是否要安装 Ollama?(y/n): " install_ollama
-            if [[ $install_ollama == "y" || $install_ollama == "Y" ]]; then
-                install_ollama
-            fi
-        fi
+    # 检查Docker是否运行
+    if ! docker ps &>/dev/null; then
+        display_status "Docker服务未运行" "error"
+        return 1
     fi
     
-    # 创建 .env 文件
-    display_status "创建 .env 文件..." "info"
-    cat > /root/.dria/.env << EOF
-OLLAMA_HOST=http://127.0.0.1:11434
-OLLAMA_MODELS=Llama3_2_1B
-EOF
+    # 检查Ollama容器是否运行
+    if ! docker ps | grep -q "ollama"; then
+        display_status "未检测到运行中的Ollama容器" "error"
+        return 1
+    fi
     
-    display_status "Ollama 修复完成" "success"
-    read -n 1 -s -r -p "按任意键继续..."
+    # 创建必要的目录结构
+    display_status "创建Ollama必要目录..." "info"
+    mkdir -p /root/.ollama/models
+    chmod -R 755 /root/.ollama
+    chown -R root:root /root/.ollama
+    
+    # 获取Ollama容器ID
+    OLLAMA_CONTAINER=$(docker ps | grep ollama | awk '{print $1}')
+    
+    if [ -z "$OLLAMA_CONTAINER" ]; then
+        display_status "无法获取Ollama容器ID" "error"
+        return 1
+    fi
+    
+    display_status "检测到Ollama容器: $OLLAMA_CONTAINER" "info"
+    
+    # 创建临时脚本
+    cat > /tmp/fix_ollama.sh << 'EOF'
+#!/bin/bash
+mkdir -p /root/.ollama/models
+chmod -R 755 /root/.ollama
+chown -R root:root /root/.ollama
+EOF
+    chmod +x /tmp/fix_ollama.sh
+    
+    # 将脚本复制到容器内并执行
+    display_status "在Ollama容器内执行修复..." "info"
+    docker cp /tmp/fix_ollama.sh $OLLAMA_CONTAINER:/tmp/
+    docker exec $OLLAMA_CONTAINER /bin/bash /tmp/fix_ollama.sh
+    
+    # 重启Ollama容器
+    display_status "重启Ollama容器..." "info"
+    docker restart $OLLAMA_CONTAINER
+    
+    # 等待Ollama服务重新启动
+    sleep 5
+    
+    # 检查Ollama服务是否正常
+    if curl -s http://localhost:11434/api/tags >/dev/null; then
+        display_status "Ollama服务已恢复正常" "success"
+    else
+        display_status "Ollama服务可能仍有问题，请检查Docker日志" "warning"
+        echo "可以使用以下命令查看日志："
+        echo "docker logs $OLLAMA_CONTAINER"
+    fi
+    
+    # 清理临时文件
+    rm -f /tmp/fix_ollama.sh
+    
+    return 0
 }
