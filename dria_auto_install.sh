@@ -1326,6 +1326,18 @@ manage_dria_node() {
         fi
     fi
     
+    # 创建必要的目录和文件
+    mkdir -p /root/.dria/dkn-compute-launcher
+    if [ ! -f /root/.dria/dkn-compute-launcher/.env ]; then
+        touch /root/.dria/dkn-compute-launcher/.env
+        chmod 600 /root/.dria/dkn-compute-launcher/.env
+    fi
+    
+    # 确保目录和文件权限正确
+    chown -R root:root /root/.dria
+    chmod -R 700 /root/.dria
+    chmod 600 /root/.dria/dkn-compute-launcher/.env
+    
     echo -e "${MENU_COLOR}请选择操作:${NORMAL}"
     echo -e "${MENU_COLOR}1. 启动 Dria 节点${NORMAL}"
     echo -e "${MENU_COLOR}2. 配置 Dria 节点设置${NORMAL}"
@@ -1353,19 +1365,6 @@ manage_dria_node() {
             
             # 如果已经配置了基本设置，则继续处理推荐码
             display_status "正在配置推荐码管理环境..." "info"
-            # 创建必要的目录和文件
-            mkdir -p /root/.dria/dkn-compute-launcher
-            if [ ! -f /root/.dria/dkn-compute-launcher/.env ]; then
-                touch /root/.dria/dkn-compute-launcher/.env
-                chmod 600 /root/.dria/dkn-compute-launcher/.env
-            fi
-            
-            # 确保目录和文件权限正确
-            chown -R root:root /root/.dria
-            chmod -R 700 /root/.dria
-            chmod 600 /root/.dria/dkn-compute-launcher/.env
-            
-            # 现在执行推荐码管理
             dkn-compute-launcher referrals
             ;;
         5) dkn-compute-launcher measure ;;
