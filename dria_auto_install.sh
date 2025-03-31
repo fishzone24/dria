@@ -773,7 +773,40 @@ EOF
         "external_addresses": [
             "/ip4/$WSL_IP/tcp/4001",
             "/ip4/$WSL_IP/udp/4001/quic-v1"
-        ]
+        ],
+        "enable_relay": true,
+        "relay_discovery": true,
+        "relay_connection_timeout_ms": 60000,
+        "direct_connection_timeout_ms": 20000,
+        "connection_idle_timeout": 300,
+        "mesh_size": 8,
+        "target_mesh_size": 8,
+        "min_mesh_size": 4,
+        "max_mesh_size": 12,
+        "heartbeat_interval": 1000,
+        "heartbeat_timeout": 5000,
+        "gossip_factor": 0.25,
+        "d": 6,
+        "d_low": 4,
+        "d_high": 8,
+        "d_score": 4,
+        "d_out": 2,
+        "gossip_history_length": 5,
+        "gossip_history_gossip": 3,
+        "opportunistic_graft_ticks": 60,
+        "opportunistic_graft_peer_threshold": 0.1,
+        "graft_flood_threshold": 5,
+        "prune_peers": 16,
+        "prune_backoff": 1,
+        "unsubscribe_backoff": 60,
+        "connectors": 8,
+        "max_connections": 50,
+        "min_connections": 10,
+        "connection_timeout_ms": 10000,
+        "connection_retry_delay_ms": 1000,
+        "connection_retry_attempts": 5,
+        "connection_retry_factor": 1.5,
+        "connection_retry_max_delay_ms": 30000
     }
 }
 EOF
@@ -816,10 +849,33 @@ EOF
         cat /tmp/setup_port_forward.ps1
     fi
     
+    # 检查Docker网络
+    display_status "检查Docker网络..." "info"
+    if command -v docker &> /dev/null; then
+        docker network prune -f
+        docker system prune -f
+        docker container prune -f
+    fi
+    
     # 启动Dria节点
     display_status "启动Dria节点..." "info"
     export DKN_LOG=debug
     dkn-compute-launcher start
+    
+    # 等待节点启动
+    sleep 5
+    
+    # 检查节点状态
+    if pgrep -f dkn-compute-launcher > /dev/null; then
+        display_status "Dria节点已成功启动" "success"
+        echo "请等待几分钟让节点建立连接..."
+        echo "如果仍然没有连接，请尝试以下步骤："
+        echo "1. 在Windows PowerShell(管理员)中执行：wsl --shutdown"
+        echo "2. 重新打开WSL终端"
+        echo "3. 重新运行此工具"
+    else
+        display_status "Dria节点启动失败，请检查日志" "error"
+    fi
     
     display_status "WSL网络修复完成" "success"
 }
