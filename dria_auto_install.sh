@@ -561,11 +561,59 @@ EOF
     display_status "网络诊断完成" "success"
 }
 
-# 创建直接IP连接工具
-create_direct_connect_tool() {
-    display_status "正在创建直接IP连接工具..." "info"
+# WSL网络修复功能
+fix_wsl_network() {
+    display_status "WSL网络修复工具" "info"
     
-    # 创建settings.json
+    # 检查是否在WSL环境中
+    if ! grep -qi "microsoft" /proc/version && ! grep -qi "microsoft" /proc/sys/kernel/osrelease; then
+        display_status "此功能仅适用于WSL环境" "error"
+        return 1
+    fi
+    
+    # 停止现有服务
+    display_status "停止现有服务..." "info"
+    systemctl stop dria-node 2>/dev/null
+    pkill -f dkn-compute-launcher
+    sleep 2
+    
+    # 获取Windows主机IP
+    display_status "获取Windows主机IP..." "info"
+    WIN_HOST_IP=$(ip route | grep default | awk '{print $3}')
+    if [ -z "$WIN_HOST_IP" ]; then
+        display_status "无法获取Windows主机IP" "error"
+        return 1
+    fi
+    
+    # 修复DNS配置
+    display_status "修复DNS配置..." "info"
+    echo "nameserver $WIN_HOST_IP" > /etc/resolv.conf
+    echo "nameserver 8.8.8.8" >> /etc/resolv.conf
+    echo "nameserver 1.1.1.1" >> /etc/resolv.conf
+    
+    # 添加hosts映射
+    display_status "添加hosts映射..." "info"
+    if ! grep -q "node1.dria.co" /etc/hosts; then
+        cat >> /etc/hosts << 'EOF'
+# Dria节点IP映射
+34.145.16.76 node1.dria.co
+34.42.109.93 node2.dria.co
+34.42.43.172 node3.dria.co
+35.200.247.78 node4.dria.co
+34.92.171.75 node5.dria.co
+EOF
+    fi
+    
+    # 获取WSL IP
+    display_status "获取WSL IP..." "info"
+    WSL_IP=$(hostname -I | awk '{print $1}')
+    if [ -z "$WSL_IP" ]; then
+        display_status "无法获取WSL IP" "error"
+        return 1
+    fi
+    
+    # 创建优化的网络配置
+    display_status "创建优化的网络配置..." "info"
     mkdir -p /root/.dria
     cat > /root/.dria/settings.json << EOF
 {
@@ -579,228 +627,63 @@ create_direct_connect_tool() {
             "/ip4/34.42.43.172/tcp/4001/p2p/QmZZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
             "/ip4/35.200.247.78/tcp/4001/p2p/QmWZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
             "/ip4/34.92.171.75/tcp/4001/p2p/QmVZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV"
+        ],
+        "listen_addresses": [
+            "/ip4/0.0.0.0/tcp/4001",
+            "/ip4/0.0.0.0/udp/4001/quic-v1"
+        ],
+        "external_addresses": [
+            "/ip4/$WSL_IP/tcp/4001",
+            "/ip4/$WSL_IP/udp/4001/quic-v1"
         ]
     }
 }
 EOF
     
-    # 创建dria-direct命令
-    cat > /usr/local/bin/dria-direct << EOF
-#!/bin/bash
-export DKN_LOG=debug
-dkn-compute-launcher start
+    # 创建Windows端口转发脚本
+    display_status "创建Windows端口转发脚本..." "info"
+    cat > /tmp/setup_port_forward.ps1 << EOF
+# 删除现有端口转发
+netsh interface portproxy delete v4tov4 listenport=4001 listenaddress=0.0.0.0 2>\$null
+netsh interface portproxy delete v4tov4 listenport=1337 listenaddress=0.0.0.0 2>\$null
+netsh interface portproxy delete v4tov4 listenport=11434 listenaddress=0.0.0.0 2>\$null
+
+# 添加新的端口转发
+netsh interface portproxy add v4tov4 listenport=4001 listenaddress=0.0.0.0 connectport=4001 connectaddress=$WSL_IP
+netsh interface portproxy add v4tov4 listenport=1337 listenaddress=0.0.0.0 connectport=1337 connectaddress=$WSL_IP
+netsh interface portproxy add v4tov4 listenport=11434 listenaddress=0.0.0.0 connectport=11434 connectaddress=$WSL_IP
+
+# 添加防火墙规则
+New-NetFirewallRule -DisplayName "WSL-Dria-4001-TCP" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 4001 -ErrorAction SilentlyContinue
+New-NetFirewallRule -DisplayName "WSL-Dria-4001-UDP" -Direction Inbound -Action Allow -Protocol UDP -LocalPort 4001 -ErrorAction SilentlyContinue
+New-NetFirewallRule -DisplayName "WSL-Dria-1337-TCP" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 1337 -ErrorAction SilentlyContinue
+New-NetFirewallRule -DisplayName "WSL-Dria-11434-TCP" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 11434 -ErrorAction SilentlyContinue
 EOF
-    chmod +x /usr/local/bin/dria-direct
     
-    display_status "直接IP连接工具创建完成" "success"
-}
-
-# 创建超级修复工具
-create_superfix_tool() {
-    display_status "正在创建超级修复工具..." "info"
-    
-    cat > /usr/local/bin/dria-superfix << 'EOF'
-#!/bin/bash
-echo "正在执行超级修复..."
-
-# 检测是否在WSL环境中
-if grep -q "microsoft" /proc/version 2>/dev/null || grep -q "Microsoft" /proc/sys/kernel/osrelease 2>/dev/null; then
-    echo "检测到WSL环境，使用WSL特定配置..."
-    IS_WSL=true
-else
-    IS_WSL=false
-fi
-
-# 停止现有服务
-systemctl stop dria-node 2>/dev/null
-pkill -f dkn-compute-launcher
-sleep 2
-
-# 清理Docker资源
-if command -v docker &> /dev/null; then
-    echo "清理Docker资源..."
-    docker network prune -f
-    docker system prune -f
-    docker container prune -f
-fi
-
-# 修复DNS
-echo "修复DNS配置..."
-if [ "$IS_WSL" = true ]; then
-    # WSL环境使用Windows主机作为DNS
-    WIN_HOST_IP=$(ip route | grep default | awk '{print $3}')
-    if [ ! -z "$WIN_HOST_IP" ]; then
-        echo "nameserver $WIN_HOST_IP" > /etc/resolv.conf
+    # 尝试执行Windows脚本
+    display_status "尝试执行Windows端口转发脚本..." "info"
+    if command -v cmd.exe &>/dev/null; then
+        cmd.exe /c "powershell -ExecutionPolicy Bypass -File /tmp/setup_port_forward.ps1" 2>/dev/null || {
+            display_status "无法自动执行Windows脚本，请手动执行" "warning"
+            echo "请在Windows PowerShell(管理员)中执行以下命令："
+            echo "1. 打开PowerShell(管理员)"
+            echo "2. 复制并执行以下内容："
+            cat /tmp/setup_port_forward.ps1
+        }
+    else
+        display_status "无法执行Windows命令，请手动配置" "warning"
+        echo "请在Windows PowerShell(管理员)中执行以下命令："
+        echo "1. 打开PowerShell(管理员)"
+        echo "2. 复制并执行以下内容："
+        cat /tmp/setup_port_forward.ps1
     fi
-fi
-echo "nameserver 8.8.8.8" >> /etc/resolv.conf
-echo "nameserver 1.1.1.1" >> /etc/resolv.conf
-
-# 添加hosts映射
-if ! grep -q "node1.dria.co" /etc/hosts; then
-    echo "添加节点IP映射..."
-    cat >> /etc/hosts << 'HOSTS'
-# Dria节点IP映射
-34.145.16.76 node1.dria.co
-34.42.109.93 node2.dria.co
-34.42.43.172 node3.dria.co
-35.200.247.78 node4.dria.co
-34.92.171.75 node5.dria.co
-HOSTS
-fi
-
-# 创建优化的网络配置
-echo "创建优化的网络配置..."
-mkdir -p /root/.dria
-
-# 获取本机IP
-LOCAL_IP=$(hostname -I | awk '{print $1}')
-if [ -z "$LOCAL_IP" ]; then
-    LOCAL_IP="0.0.0.0"
-fi
-
-# 根据环境创建不同的网络配置
-if [ "$IS_WSL" = true ]; then
-    # WSL环境配置
-    cat > /root/.dria/settings.json << EOL
-{
-    "network": {
-        "connection_timeout": 300,
-        "direct_connection_timeout": 20000,
-        "relay_connection_timeout": 60000,
-        "bootstrap_nodes": [
-            "/ip4/34.145.16.76/tcp/4001/p2p/QmXZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
-            "/ip4/34.42.109.93/tcp/4001/p2p/QmYZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
-            "/ip4/34.42.43.172/tcp/4001/p2p/QmZZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
-            "/ip4/35.200.247.78/tcp/4001/p2p/QmWZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
-            "/ip4/34.92.171.75/tcp/4001/p2p/QmVZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
-            "/ip4/98.85.74.179/tcp/4001/p2p/16Uiu2HAmH4YGRWuJSvo5bxdShozKSve1WaZMGzAr3GiNNzadsdaN",
-            "/ip4/52.73.119.21/tcp/4001/p2p/16Uiu2HAmAYyZ69AXRfVHvp887ZTt5R2hm3ipHRJcDnaVCr3KB9qM"
-        ],
-        "listen_addresses": [
-            "/ip4/0.0.0.0/tcp/4001",
-            "/ip4/0.0.0.0/udp/4001/quic-v1"
-        ],
-        "external_addresses": [
-            "/ip4/$LOCAL_IP/tcp/4001",
-            "/ip4/$LOCAL_IP/udp/4001/quic-v1"
-        ],
-        "enable_relay": true,
-        "relay_discovery": true,
-        "relay_connection_timeout_ms": 60000,
-        "direct_connection_timeout_ms": 20000,
-        "connection_idle_timeout": 300,
-        "mesh_size": 8,
-        "target_mesh_size": 8,
-        "min_mesh_size": 4,
-        "max_mesh_size": 12,
-        "heartbeat_interval": 1000,
-        "heartbeat_timeout": 5000,
-        "gossip_factor": 0.25,
-        "d": 6,
-        "d_low": 4,
-        "d_high": 8,
-        "d_score": 4,
-        "d_out": 2,
-        "gossip_history_length": 5,
-        "gossip_history_gossip": 3,
-        "opportunistic_graft_ticks": 60,
-        "opportunistic_graft_peer_threshold": 0.1,
-        "graft_flood_threshold": 5,
-        "prune_peers": 16,
-        "prune_backoff": 1,
-        "unsubscribe_backoff": 60,
-        "connectors": 8,
-        "max_connections": 50,
-        "min_connections": 10,
-        "connection_timeout_ms": 10000,
-        "connection_retry_delay_ms": 1000,
-        "connection_retry_attempts": 5,
-        "connection_retry_factor": 1.5,
-        "connection_retry_max_delay_ms": 30000
-    }
-}
-EOL
-else
-    # 原生Linux环境配置
-    cat > /root/.dria/settings.json << EOL
-{
-    "network": {
-        "connection_timeout": 300,
-        "direct_connection_timeout": 20000,
-        "relay_connection_timeout": 60000,
-        "bootstrap_nodes": [
-            "/ip4/34.145.16.76/tcp/4001/p2p/QmXZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
-            "/ip4/34.42.109.93/tcp/4001/p2p/QmYZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
-            "/ip4/34.42.43.172/tcp/4001/p2p/QmZZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
-            "/ip4/35.200.247.78/tcp/4001/p2p/QmWZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
-            "/ip4/34.92.171.75/tcp/4001/p2p/QmVZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
-            "/ip4/98.85.74.179/tcp/4001/p2p/16Uiu2HAmH4YGRWuJSvo5bxdShozKSve1WaZMGzAr3GiNNzadsdaN",
-            "/ip4/52.73.119.21/tcp/4001/p2p/16Uiu2HAmAYyZ69AXRfVHvp887ZTt5R2hm3ipHRJcDnaVCr3KB9qM"
-        ],
-        "listen_addresses": [
-            "/ip4/0.0.0.0/tcp/4001",
-            "/ip4/0.0.0.0/udp/4001/quic-v1"
-        ],
-        "external_addresses": [
-            "/ip4/$LOCAL_IP/tcp/4001",
-            "/ip4/$LOCAL_IP/udp/4001/quic-v1"
-        ],
-        "enable_relay": true,
-        "relay_discovery": true,
-        "relay_connection_timeout_ms": 60000,
-        "direct_connection_timeout_ms": 20000,
-        "connection_idle_timeout": 300,
-        "mesh_size": 8,
-        "target_mesh_size": 8,
-        "min_mesh_size": 4,
-        "max_mesh_size": 12,
-        "heartbeat_interval": 1000,
-        "heartbeat_timeout": 5000,
-        "gossip_factor": 0.25,
-        "d": 6,
-        "d_low": 4,
-        "d_high": 8,
-        "d_score": 4,
-        "d_out": 2,
-        "gossip_history_length": 5,
-        "gossip_history_gossip": 3,
-        "opportunistic_graft_ticks": 60,
-        "opportunistic_graft_peer_threshold": 0.1,
-        "graft_flood_threshold": 5,
-        "prune_peers": 16,
-        "prune_backoff": 1,
-        "unsubscribe_backoff": 60,
-        "connectors": 8,
-        "max_connections": 50,
-        "min_connections": 10,
-        "connection_timeout_ms": 10000,
-        "connection_retry_delay_ms": 1000,
-        "connection_retry_attempts": 5,
-        "connection_retry_factor": 1.5,
-        "connection_retry_max_delay_ms": 30000
-    }
-}
-EOL
-fi
-
-# 检查防火墙
-if command -v ufw &> /dev/null; then
-    echo "配置防火墙规则..."
-    ufw allow 4001/tcp
-    ufw allow 4001/udp
-    ufw allow 1337/tcp
-    ufw allow 11434/tcp
-fi
-
-# 启动节点
-echo "启动Dria节点..."
-export DKN_LOG=debug
-dkn-compute-launcher start
-EOF
     
-    chmod +x /usr/local/bin/dria-superfix
-    display_status "超级修复工具创建完成" "success"
+    # 启动Dria节点
+    display_status "启动Dria节点..." "info"
+    export DKN_LOG=debug
+    dkn-compute-launcher start
+    
+    display_status "WSL网络修复完成" "success"
 }
 
 # 修改configure_wsl_network函数，增加DNS修复和直接连接工具
