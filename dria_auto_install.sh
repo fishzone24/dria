@@ -906,7 +906,8 @@ EOF
     
     # 创建docker-compose.yml文件
     display_status "创建docker-compose.yml文件..." "info"
-    cat > /root/.dria/docker-compose.yml << EOF
+    mkdir -p /root/.dria
+    cat > /root/.dria/docker-compose.yml << 'EOF'
 version: '3.8'
 
 services:
@@ -931,25 +932,9 @@ networks:
     driver: bridge
 EOF
     
-    # 创建Windows端口转发脚本
-    display_status "创建Windows端口转发脚本..." "info"
-    cat > /root/.dria/wsl_port_forward.ps1 << EOF
-# 删除现有的端口转发规则
-netsh interface portproxy delete v4tov4 listenport=4001
-netsh interface portproxy delete v4tov4 listenport=1337
-netsh interface portproxy delete v4tov4 listenport=11434
-
-# 添加新的端口转发规则
-netsh interface portproxy add v4tov4 listenport=4001 listenaddress=0.0.0.0 connectport=4001 connectaddress=$WINDOWS_IP
-netsh interface portproxy add v4tov4 listenport=1337 listenaddress=0.0.0.0 connectport=1337 connectaddress=$WINDOWS_IP
-netsh interface portproxy add v4tov4 listenport=11434 listenaddress=0.0.0.0 connectport=11434 connectaddress=$WINDOWS_IP
-
-# 配置Windows防火墙规则
-New-NetFirewallRule -DisplayName "WSL-Dria-4001-TCP" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 4001
-New-NetFirewallRule -DisplayName "WSL-Dria-4001-UDP" -Direction Inbound -Action Allow -Protocol UDP -LocalPort 4001
-New-NetFirewallRule -DisplayName "WSL-Dria-1337-TCP" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 1337
-New-NetFirewallRule -DisplayName "WSL-Dria-11434-TCP" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 11434
-EOF
+    # 确保文件权限正确
+    chmod 644 /root/.dria/docker-compose.yml
+    chown root:root /root/.dria/docker-compose.yml
     
     # 检查Docker网络
     display_status "检查Docker网络..." "info"
