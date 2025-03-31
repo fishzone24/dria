@@ -1682,13 +1682,10 @@ main_menu() {
                 read -n 1 -s -r -p "按任意键继续..."
                 ;;
             [Dd])
-                display_status "正在运行DNS修复工具..." "info"
                 fix_wsl_dns
-                display_status "DNS修复完成" "success"
                 read -n 1 -s -r -p "按任意键继续..."
                 ;;
             [Ff])
-                display_status "正在运行超级修复工具..." "info"
                 create_superfix_tool
                 display_status "超级修复工具已创建，可以使用 'dria-superfix' 命令启动" "success"
                 read -p "是否立即运行超级修复工具?(y/n): " run_superfix
@@ -1697,7 +1694,6 @@ main_menu() {
                 fi
                 ;;
             [Ii])
-                display_status "正在创建直接IP连接工具..." "info"
                 create_direct_connect_tool
                 display_status "直接IP连接工具已创建，可以使用 'dria-direct' 命令启动" "success"
                 read -p "是否立即运行直接IP连接?(y/n): " run_direct
