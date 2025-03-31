@@ -561,51 +561,185 @@ EOF
     display_status "网络诊断完成" "success"
 }
 
+# 检查并配置防火墙
+check_and_configure_firewall() {
+    display_status "检查防火墙配置..." "info"
+    
+    # 检查端口是否被占用
+    check_port() {
+        local port=$1
+        local protocol=$2
+        if netstat -tuln | grep -q ":$port "; then
+            echo "端口 $port ($protocol) 已被占用"
+            return 1
+        fi
+        return 0
+    }
+    
+    # 安装必要的工具
+    if ! command -v netstat &> /dev/null; then
+        display_status "安装网络工具..." "info"
+        apt-get update
+        apt-get install -y net-tools
+    fi
+    
+    # 检查并安装UFW
+    if ! command -v ufw &> /dev/null; then
+        display_status "安装UFW防火墙..." "info"
+        apt-get update
+        apt-get install -y ufw
+    fi
+    
+    # 检查并安装iptables
+    if ! command -v iptables &> /dev/null; then
+        display_status "安装iptables..." "info"
+        apt-get update
+        apt-get install -y iptables
+    fi
+    
+    # 检查端口占用情况
+    display_status "检查端口占用情况..." "info"
+    for port in 4001 1337 11434; do
+        if ! check_port $port "TCP"; then
+            display_status "端口 $port 已被占用，正在尝试释放..." "warning"
+            # 查找占用端口的进程
+            pid=$(lsof -i :$port -t)
+            if [ ! -z "$pid" ]; then
+                echo "正在停止占用端口 $port 的进程 (PID: $pid)"
+                kill -9 $pid
+                sleep 2
+            fi
+        fi
+    done
+    
+    # 配置UFW
+    display_status "配置UFW防火墙..." "info"
+    if command -v ufw &> /dev/null; then
+        # 如果UFW未启用，先启用它
+        if ! ufw status | grep -q "Status: active"; then
+            echo "y" | ufw enable
+        fi
+        
+        # 添加必要的端口规则
+        ufw allow 4001/tcp
+        ufw allow 4001/udp
+        ufw allow 1337/tcp
+        ufw allow 11434/tcp
+        
+        # 重新加载防火墙规则
+        ufw reload
+    fi
+    
+    # 配置iptables
+    display_status "配置iptables..." "info"
+    if command -v iptables &> /dev/null; then
+        # 添加必要的端口规则
+        iptables -A INPUT -p tcp --dport 4001 -j ACCEPT
+        iptables -A INPUT -p udp --dport 4001 -j ACCEPT
+        iptables -A INPUT -p tcp --dport 1337 -j ACCEPT
+        iptables -A INPUT -p tcp --dport 11434 -j ACCEPT
+        
+        # 保存iptables规则
+        if command -v iptables-save &> /dev/null; then
+            iptables-save > /etc/iptables.rules
+        fi
+    fi
+    
+    # 检查云服务商防火墙
+    display_status "检查云服务商防火墙配置..." "info"
+    echo "请确保在云服务商控制面板中开放以下端口："
+    echo "- TCP 4001"
+    echo "- UDP 4001"
+    echo "- TCP 1337"
+    echo "- TCP 11434"
+    
+    # 测试端口是否可访问
+    display_status "测试端口可访问性..." "info"
+    if ! command -v nc &> /dev/null; then
+        display_status "安装netcat进行端口测试..." "info"
+        apt-get update
+        apt-get install -y netcat
+    fi
+    
+    # 测试TCP端口
+    for port in 4001 1337 11434; do
+        echo "测试TCP端口 $port..."
+        if nc -zv localhost $port 2>&1 | grep -q "succeeded"; then
+            display_status "TCP端口 $port 开放成功" "success"
+        else
+            display_status "TCP端口 $port 可能未开放" "warning"
+        fi
+    done
+    
+    # 测试UDP端口
+    echo "测试UDP端口 4001..."
+    if nc -zuv localhost 4001 2>&1 | grep -q "succeeded"; then
+        display_status "UDP端口 4001 开放成功" "success"
+    else
+        display_status "UDP端口 4001 可能未开放" "warning"
+    fi
+    
+    # 显示当前端口状态
+    display_status "当前端口状态:" "info"
+    netstat -tulpn | grep -E '4001|1337|11434'
+    
+    # 显示防火墙状态
+    if command -v ufw &> /dev/null; then
+        display_status "UFW防火墙状态:" "info"
+        ufw status
+    fi
+    
+    if command -v iptables &> /dev/null; then
+        display_status "iptables规则:" "info"
+        iptables -L -n | grep -E '4001|1337|11434'
+    fi
+    
+    display_status "防火墙配置完成" "success"
+}
+
 # 创建超级修复工具
 create_superfix_tool() {
-    display_status "正在创建超级修复工具..." "info"
+    display_status "创建超级修复工具" "info"
     
-    cat > /usr/local/bin/dria-superfix << 'EOF'
-#!/bin/bash
-echo "正在执行超级修复..."
-
-# 检测是否在WSL环境中
-if grep -q "microsoft" /proc/version 2>/dev/null || grep -q "Microsoft" /proc/sys/kernel/osrelease 2>/dev/null; then
-    echo "检测到WSL环境，使用WSL特定配置..."
-    IS_WSL=true
-else
-    IS_WSL=false
-fi
-
-# 停止现有服务
-systemctl stop dria-node 2>/dev/null
-pkill -f dkn-compute-launcher
-sleep 2
-
-# 清理Docker资源
-if command -v docker &> /dev/null; then
-    echo "清理Docker资源..."
-    docker network prune -f
-    docker system prune -f
-    docker container prune -f
-fi
-
-# 修复DNS
-echo "修复DNS配置..."
-if [ "$IS_WSL" = true ]; then
-    # WSL环境使用Windows主机作为DNS
-    WIN_HOST_IP=$(ip route | grep default | awk '{print $3}')
-    if [ ! -z "$WIN_HOST_IP" ]; then
-        echo "nameserver $WIN_HOST_IP" > /etc/resolv.conf
+    # 检查并配置防火墙
+    check_and_configure_firewall
+    
+    # 检测运行环境
+    if grep -qi "microsoft" /proc/version || grep -qi "microsoft" /proc/sys/kernel/osrelease; then
+        display_status "检测到WSL环境" "info"
+    else
+        display_status "检测到原生Linux环境" "info"
     fi
-fi
-echo "nameserver 8.8.8.8" >> /etc/resolv.conf
-echo "nameserver 1.1.1.1" >> /etc/resolv.conf
-
-# 添加hosts映射
-if ! grep -q "node1.dria.co" /etc/hosts; then
-    echo "添加节点IP映射..."
-    cat >> /etc/hosts << 'HOSTS'
+    
+    # 停止现有服务
+    systemctl stop dria-node 2>/dev/null
+    pkill -f dkn-compute-launcher
+    sleep 2
+    
+    # 清理Docker资源
+    if command -v docker &> /dev/null; then
+        echo "清理Docker资源..."
+        docker network prune -f
+        docker system prune -f
+        docker container prune -f
+    fi
+    
+    # 修复DNS
+    echo "修复DNS配置..."
+    if [ "$ENV_TYPE" = "wsl" ]; then
+        # WSL环境使用Windows主机作为DNS
+        WIN_HOST_IP=$(ip route | grep default | awk '{print $3}')
+        if [ ! -z "$WIN_HOST_IP" ]; then
+            echo "nameserver $WIN_HOST_IP" > /etc/resolv.conf
+        fi
+    fi
+    echo "nameserver 8.8.8.8" >> /etc/resolv.conf
+    echo "nameserver 1.1.1.1" >> /etc/resolv.conf
+    
+    # 添加hosts映射
+    if ! grep -q "node1.dria.co" /etc/hosts; then
+        echo "添加节点IP映射..."
+        cat >> /etc/hosts << 'HOSTS'
 # Dria节点IP映射
 34.145.16.76 node1.dria.co
 34.42.109.93 node2.dria.co
@@ -613,90 +747,86 @@ if ! grep -q "node1.dria.co" /etc/hosts; then
 35.200.247.78 node4.dria.co
 34.92.171.75 node5.dria.co
 HOSTS
-fi
-
-# 创建优化的网络配置
-echo "创建优化的网络配置..."
-mkdir -p /root/.dria
-
-# 获取本机IP
-LOCAL_IP=$(hostname -I | awk '{print $1}')
-if [ -z "$LOCAL_IP" ]; then
-    LOCAL_IP="0.0.0.0"
-fi
-
-# 根据环境创建不同的网络配置
-if [ "$IS_WSL" = true ]; then
-    # WSL环境配置
-    cat > /root/.dria/settings.json << EOL
-{
-    "network": {
-        "connection_timeout": 300,
-        "direct_connection_timeout": 20000,
-        "relay_connection_timeout": 60000,
-        "bootstrap_nodes": [
-            "/ip4/34.145.16.76/tcp/4001/p2p/QmXZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
-            "/ip4/34.42.109.93/tcp/4001/p2p/QmYZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
-            "/ip4/34.42.43.172/tcp/4001/p2p/QmZZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
-            "/ip4/35.200.247.78/tcp/4001/p2p/QmWZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
-            "/ip4/34.92.171.75/tcp/4001/p2p/QmVZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV"
-        ],
-        "listen_addresses": [
-            "/ip4/0.0.0.0/tcp/4001",
-            "/ip4/0.0.0.0/udp/4001/quic-v1"
-        ],
-        "external_addresses": [
-            "/ip4/$LOCAL_IP/tcp/4001",
-            "/ip4/$LOCAL_IP/udp/4001/quic-v1"
-        ]
-    }
-}
-EOL
-else
-    # 原生Linux环境配置
-    cat > /root/.dria/settings.json << EOL
-{
-    "network": {
-        "connection_timeout": 300,
-        "direct_connection_timeout": 20000,
-        "relay_connection_timeout": 60000,
-        "bootstrap_nodes": [
-            "/ip4/34.145.16.76/tcp/4001/p2p/QmXZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
-            "/ip4/34.42.109.93/tcp/4001/p2p/QmYZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
-            "/ip4/34.42.43.172/tcp/4001/p2p/QmZZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
-            "/ip4/35.200.247.78/tcp/4001/p2p/QmWZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
-            "/ip4/34.92.171.75/tcp/4001/p2p/QmVZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV"
-        ],
-        "listen_addresses": [
-            "/ip4/0.0.0.0/tcp/4001",
-            "/ip4/0.0.0.0/udp/4001/quic-v1"
-        ],
-        "external_addresses": [
-            "/ip4/$LOCAL_IP/tcp/4001",
-            "/ip4/$LOCAL_IP/udp/4001/quic-v1"
-        ]
-    }
-}
-EOL
-fi
-
-# 检查防火墙
-if command -v ufw &> /dev/null; then
-    echo "配置防火墙规则..."
-    ufw allow 4001/tcp
-    ufw allow 4001/udp
-    ufw allow 1337/tcp
-    ufw allow 11434/tcp
-fi
-
-# 启动节点
-echo "启动Dria节点..."
-export DKN_LOG=debug
-dkn-compute-launcher start
-EOF
+    fi
     
-    chmod +x /usr/local/bin/dria-superfix
-    display_status "超级修复工具创建完成" "success"
+    # 创建优化的网络配置
+    echo "创建优化的网络配置..."
+    mkdir -p /root/.dria
+    
+    # 获取本机IP
+    LOCAL_IP=$(hostname -I | awk '{print $1}')
+    if [ -z "$LOCAL_IP" ]; then
+        LOCAL_IP="0.0.0.0"
+    fi
+    
+    # 根据环境创建不同的网络配置
+    if [ "$ENV_TYPE" = "wsl" ]; then
+        # WSL环境配置
+        cat > /root/.dria/settings.json << EOL
+{
+    "network": {
+        "connection_timeout": 300,
+        "direct_connection_timeout": 20000,
+        "relay_connection_timeout": 60000,
+        "bootstrap_nodes": [
+            "/ip4/34.145.16.76/tcp/4001/p2p/QmXZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
+            "/ip4/34.42.109.93/tcp/4001/p2p/QmYZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
+            "/ip4/34.42.43.172/tcp/4001/p2p/QmZZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
+            "/ip4/35.200.247.78/tcp/4001/p2p/QmWZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
+            "/ip4/34.92.171.75/tcp/4001/p2p/QmVZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV"
+        ],
+        "listen_addresses": [
+            "/ip4/0.0.0.0/tcp/4001",
+            "/ip4/0.0.0.0/udp/4001/quic-v1"
+        ],
+        "external_addresses": [
+            "/ip4/$LOCAL_IP/tcp/4001",
+            "/ip4/$LOCAL_IP/udp/4001/quic-v1"
+        ]
+    }
+}
+EOL
+    else
+        # 原生Linux环境配置
+        cat > /root/.dria/settings.json << EOL
+{
+    "network": {
+        "connection_timeout": 300,
+        "direct_connection_timeout": 20000,
+        "relay_connection_timeout": 60000,
+        "bootstrap_nodes": [
+            "/ip4/34.145.16.76/tcp/4001/p2p/QmXZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
+            "/ip4/34.42.109.93/tcp/4001/p2p/QmYZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
+            "/ip4/34.42.43.172/tcp/4001/p2p/QmZZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
+            "/ip4/35.200.247.78/tcp/4001/p2p/QmWZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
+            "/ip4/34.92.171.75/tcp/4001/p2p/QmVZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV"
+        ],
+        "listen_addresses": [
+            "/ip4/0.0.0.0/tcp/4001",
+            "/ip4/0.0.0.0/udp/4001/quic-v1"
+        ],
+        "external_addresses": [
+            "/ip4/$LOCAL_IP/tcp/4001",
+            "/ip4/$LOCAL_IP/udp/4001/quic-v1"
+        ]
+    }
+}
+EOL
+    fi
+    
+    # 检查防火墙
+    if command -v ufw &> /dev/null; then
+        echo "配置防火墙规则..."
+        ufw allow 4001/tcp
+        ufw allow 4001/udp
+        ufw allow 1337/tcp
+        ufw allow 11434/tcp
+    fi
+    
+    # 启动节点
+    echo "启动Dria节点..."
+    export DKN_LOG=debug
+    dkn-compute-launcher start
 }
 
 # WSL网络修复功能
@@ -708,6 +838,9 @@ fix_wsl_network() {
         display_status "此功能仅适用于WSL环境" "error"
         return 1
     fi
+    
+    # 检查并配置防火墙
+    check_and_configure_firewall
     
     # 停止现有服务
     display_status "停止现有服务..." "info"
@@ -880,7 +1013,7 @@ EOF
     display_status "WSL网络修复完成" "success"
 }
 
-# 修改configure_wsl_network函数，增加DNS修复和直接连接工具
+# 修改 configure_wsl_network 函数，增加DNS修复和直接连接工具
 configure_wsl_network() {
     display_status "WSL网络优化工具" "info"
     echo "此功能将配置Windows主机上的端口转发，使外部网络能够访问WSL中的Dria节点。"
