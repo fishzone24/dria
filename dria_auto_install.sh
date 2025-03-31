@@ -2251,6 +2251,7 @@ services:
       - "1337:1337"
       - "11434:11434"
     command: start
+    pull_policy: never
 
 networks:
   default:
@@ -2266,6 +2267,34 @@ chown root:root /root/.dria/docker-compose.yml
 display_status "检查Docker网络..." "info"
 if ! docker network inspect dria-network >/dev/null 2>&1; then
     docker network create dria-network
+fi
+
+# 检查本地镜像
+if ! docker images | grep -q "dria/dkn-compute-launcher"; then
+    display_status "本地不存在Dria镜像，查找可用的替代镜像..." "warning"
+    
+    # 查找可能的替代镜像
+    ALT_IMAGE=$(docker images | grep -i "dria\|dkn" | head -n 1 | awk '{print $1":"$2}')
+    
+    if [ -n "$ALT_IMAGE" ]; then
+        display_status "找到替代镜像: $ALT_IMAGE，将使用该镜像" "info"
+        # 替换docker-compose.yml中的镜像
+        sed -i "s|image: dria/dkn-compute-launcher:latest|image: $ALT_IMAGE|g" /root/.dria/docker-compose.yml
+    else
+        display_status "未找到任何可用的Dria相关镜像，将尝试列出所有本地镜像" "warning"
+        echo "可用的本地镜像:"
+        docker images
+        
+        # 询问用户是否要使用本地某个镜像
+        read -p "请输入要使用的本地镜像名称（格式：name:tag，直接回车使用默认）: " USER_IMAGE
+        
+        if [ -n "$USER_IMAGE" ]; then
+            display_status "将使用镜像: $USER_IMAGE" "info"
+            sed -i "s|image: dria/dkn-compute-launcher:latest|image: $USER_IMAGE|g" /root/.dria/docker-compose.yml
+        else
+            display_status "未指定替代镜像，将尝试使用默认镜像" "warning"
+        fi
+    fi
 fi
 
 # 尝试启动节点
