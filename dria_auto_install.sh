@@ -920,6 +920,9 @@ services:
       - /root/.dria:/root/.dria
     environment:
       - DKN_LOG=debug
+      - HTTP_PROXY=${HTTP_PROXY}
+      - HTTPS_PROXY=${HTTPS_PROXY}
+      - NO_PROXY=localhost,127.0.0.1
     ports:
       - "4001:4001"
       - "1337:1337"
@@ -935,6 +938,21 @@ EOF
     # 确保文件权限正确
     chmod 644 /root/.dria/docker-compose.yml
     chown root:root /root/.dria/docker-compose.yml
+    
+    # 配置Docker代理
+    display_status "配置Docker代理..." "info"
+    mkdir -p /etc/systemd/system/docker.service.d
+    cat > /etc/systemd/system/docker.service.d/http-proxy.conf << EOF
+[Service]
+Environment="HTTP_PROXY=${HTTP_PROXY}"
+Environment="HTTPS_PROXY=${HTTPS_PROXY}"
+Environment="NO_PROXY=localhost,127.0.0.1"
+EOF
+    
+    # 重启Docker服务
+    display_status "重启Docker服务..." "info"
+    systemctl daemon-reload
+    systemctl restart docker
     
     # 检查Docker网络
     display_status "检查Docker网络..." "info"
