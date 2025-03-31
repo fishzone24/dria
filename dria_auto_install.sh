@@ -2123,6 +2123,7 @@ EOF
 initialize      # 快速初始化
 init_network_check  # 网络检测在后台进行
 display_info
+source "$0" # 确保所有函数已加载
 main_menu
 
 # WSL网络修复功能
@@ -2173,7 +2174,7 @@ display_status() {
 }
 
 # 检查是否以root权限运行
-if [ "$EUID" -ne 0 ]; then 
+if [ "$EUID" -ne 0 ]; then
     display_status "请使用root权限运行此脚本" "error"
     exit 1
 fi
@@ -2232,6 +2233,10 @@ services:
       - /root/.dria:/root/.dria
     environment:
       - DKN_LOG=debug
+      # 添加代理环境变量 (如果设置了)
+      - HTTP_PROXY=${http_proxy:-}
+      - HTTPS_PROXY=${https_proxy:-}
+      - NO_PROXY=localhost,127.0.0.1,host.docker.internal
     ports:
       - "4001:4001"
       - "1337:1337"
