@@ -944,15 +944,32 @@ EOF
     mkdir -p /etc/systemd/system/docker.service.d
     cat > /etc/systemd/system/docker.service.d/http-proxy.conf << EOF
 [Service]
-Environment="HTTP_PROXY=${HTTP_PROXY}"
-Environment="HTTPS_PROXY=${HTTPS_PROXY}"
-Environment="NO_PROXY=localhost,127.0.0.1"
+Environment="HTTP_PROXY=${http_proxy}"
+Environment="HTTPS_PROXY=${https_proxy}"
+Environment="NO_PROXY=localhost,127.0.0.1,host.docker.internal"
+EOF
+    
+    # 创建Docker客户端配置
+    mkdir -p /root/.docker
+    cat > /root/.docker/config.json << EOF
+{
+  "proxies": {
+    "default": {
+      "httpProxy": "${http_proxy}",
+      "httpsProxy": "${https_proxy}",
+      "noProxy": "localhost,127.0.0.1,host.docker.internal"
+    }
+  }
+}
 EOF
     
     # 重启Docker服务
     display_status "重启Docker服务..." "info"
     systemctl daemon-reload
     systemctl restart docker
+    
+    # 等待Docker服务完全启动
+    sleep 5
     
     # 检查Docker网络
     display_status "检查Docker网络..." "info"
