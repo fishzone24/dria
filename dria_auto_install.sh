@@ -2005,18 +2005,13 @@ EOF
         echo -e "${MENU_COLOR}8. 设置网络代理${NORMAL}"
         echo -e "${MENU_COLOR}9. 清除网络代理${NORMAL}"
         echo -e "${MENU_COLOR}H. Ollama修复工具${NORMAL}"
-        echo -e "${MENU_COLOR}O. Ollama Docker修复${NORMAL}"  # 添加新选项
+        echo -e "${MENU_COLOR}O. Ollama Docker修复${NORMAL}"
         echo -e "${MENU_COLOR}D. DNS修复工具${NORMAL}"
         echo -e "${MENU_COLOR}F. 超级修复工具${NORMAL}"
         echo -e "${MENU_COLOR}I. 直接IP连接${NORMAL}"
-        
-        # WSL特定选项
-        if [ "$ENV_TYPE" = "wsl" ]; then
-            echo -e "${MENU_COLOR}W. WSL网络修复工具${NORMAL}"
-        fi
-        
+        echo -e "${MENU_COLOR}W. WSL网络修复工具${NORMAL}"
         echo -e "${MENU_COLOR}0. 退出${NORMAL}"
-        read -p "请输入选项（0-9/H/O/D/F/I/W）: " OPTION  # 更新提示
+        read -p "请输入选项（0-9/H/O/D/F/I/W）: " OPTION
 
         case $OPTION in
             1) setup_prerequisites ;;
@@ -2065,15 +2060,11 @@ EOF
                     /usr/local/bin/dria-direct
                 fi
                 ;;
-            [Ww]) 
-                if [ "$ENV_TYPE" = "wsl" ]; then
-                    display_status "正在运行WSL网络修复工具..." "info"
-                    fix_wsl_network
-                    display_status "WSL网络修复完成" "success"
-                    read -n 1 -s -r -p "按任意键继续..."
-                else
-                    display_status "此选项仅适用于WSL环境" "error"
-                fi 
+            [Ww])
+                display_status "正在运行WSL网络修复工具..." "info"
+                fix_wsl_network
+                display_status "WSL网络修复完成" "success"
+                read -n 1 -s -r -p "按任意键继续..."
                 ;;
             0) exit 0 ;;
             *) display_status "无效选项，请重试。" "error" ;;
@@ -2096,175 +2087,3 @@ fix_wsl_network() {
         return 1
     fi
 }
-
-# 修复网络配置
-fix_network() {
-    display_status "开始修复网络配置..." "info"
-    
-    # 停止现有服务
-    display_status "停止现有服务..." "info"
-    systemctl stop dria-node 2>/dev/null || true
-    docker-compose -f /root/.dria/docker-compose.yml down 2>/dev/null || true
-    
-    # 检查并安装必要的工具
-    display_status "检查并安装必要的工具..." "info"
-    apt update
-    apt install -y net-tools ufw iptables netcat
-    
-    # 检查端口占用
-    display_status "检查端口占用情况..." "info"
-    for port in 4001 1337 11434; do
-        if netstat -tuln | grep -q ":$port "; then
-            display_status "端口 $port 已被占用，正在尝试释放..." "warning"
-            pid=$(lsof -i :$port -t)
-            if [ ! -z "$pid" ]; then
-                kill -9 $pid
-                sleep 2
-            fi
-        fi
-    done
-    
-    # 配置防火墙
-    display_status "配置防火墙规则..." "info"
-    if command -v ufw &> /dev/null; then
-        ufw allow 4001/tcp
-        ufw allow 4001/udp
-        ufw allow 1337/tcp
-        ufw allow 11434/tcp
-        ufw reload
-    fi
-    
-    if command -v iptables &> /dev/null; then
-        iptables -A INPUT -p tcp --dport 4001 -j ACCEPT
-        iptables -A INPUT -p udp --dport 4001 -j ACCEPT
-        iptables -A INPUT -p tcp --dport 1337 -j ACCEPT
-        iptables -A INPUT -p tcp --dport 11434 -j ACCEPT
-    fi
-    
-    # 修复DNS配置
-    display_status "修复DNS配置..." "info"
-    cat > /etc/resolv.conf << EOF
-nameserver 8.8.8.8
-nameserver 1.1.1.1
-EOF
-    
-    # 添加hosts映射
-    display_status "配置hosts映射..." "info"
-    cat >> /etc/hosts << EOF
-34.145.16.76 node1.dria.co
-34.42.109.93 node2.dria.co
-34.42.43.172 node3.dria.co
-35.200.247.78 node4.dria.co
-34.92.171.75 node5.dria.co
-EOF
-    
-    # 创建优化的网络配置
-    display_status "创建优化的网络配置..." "info"
-    mkdir -p /root/.dria
-    cat > /root/.dria/settings.json << EOF
-{
-    "network": {
-        "external_multiaddrs": [
-            "/ip4/0.0.0.0/tcp/4001",
-            "/ip4/0.0.0.0/udp/4001/quic"
-        ],
-        "enable_relay": true,
-        "relay_discovery": true,
-        "relay_connection_timeout": 60000,
-        "direct_connection_timeout": 20000,
-        "connection_timeout": 300,
-        "mesh": {
-            "enable": true,
-            "min_peers": 2,
-            "max_peers": 10,
-            "connection_timeout": 300,
-            "ping_interval": 30,
-            "ping_timeout": 10
-        }
-    },
-    "node": {
-        "enable_direct_connect": true,
-        "direct_connect_timeout": 20000,
-        "relay_connection_timeout": 60000,
-        "connection_timeout": 300,
-        "ping_interval": 30,
-        "ping_timeout": 10
-    }
-}
-EOF
-    
-    # 检查Docker网络
-    display_status "检查Docker网络..." "info"
-    if ! docker network inspect dria-network >/dev/null 2>&1; then
-        docker network create dria-network
-    fi
-    
-    # 启动节点
-    display_status "启动节点..." "info"
-    if docker-compose -f /root/.dria/docker-compose.yml up -d; then
-        display_status "节点启动成功" "success"
-        echo "正在检查节点状态..."
-        docker-compose -f /root/.dria/docker-compose.yml logs -f
-    else
-        display_status "节点启动失败" "error"
-        return 1
-    fi
-    
-    display_status "网络修复完成" "success"
-    echo "请检查节点状态，如果仍然无法连接，请检查："
-    echo "1. 防火墙是否允许了所需端口"
-    echo "2. 是否有其他程序占用了端口"
-    echo "3. 使用 'netstat -tulpn | grep -E '4001|1337|11434' 检查端口状态"
-}
-
-# 主菜单
-show_menu() {
-    clear
-    echo -e "${BLUE}=== Dria 一键安装脚本 ===${NC}"
-    echo -e "${YELLOW}1. 安装 Dria${NC}"
-    echo -e "${YELLOW}2. 卸载 Dria${NC}"
-    echo -e "${YELLOW}3. 启动 Dria${NC}"
-    echo -e "${YELLOW}4. 停止 Dria${NC}"
-    echo -e "${YELLOW}5. 查看 Dria 状态${NC}"
-    echo -e "${YELLOW}6. 查看 Dria 日志${NC}"
-    echo -e "${YELLOW}7. 修复网络配置${NC}"
-    echo -e "${YELLOW}8. 退出${NC}"
-    echo -e "${BLUE}========================${NC}"
-}
-
-# 主循环
-while true; do
-    show_menu
-    read -p "请选择操作 (1-8): " choice
-    case $choice in
-        1)
-            install_dria
-            ;;
-        2)
-            uninstall_dria
-            ;;
-        3)
-            start_dria
-            ;;
-        4)
-            stop_dria
-            ;;
-        5)
-            check_dria_status
-            ;;
-        6)
-            view_dria_logs
-            ;;
-        7)
-            fix_network
-            ;;
-        8)
-            display_status "感谢使用！" "success"
-            exit 0
-            ;;
-        *)
-            display_status "无效的选择，请重试" "error"
-            ;;
-    esac
-    read -p "按回车键继续..."
-done
