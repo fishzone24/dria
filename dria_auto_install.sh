@@ -1356,12 +1356,20 @@ manage_dria_node() {
         3) dkn-compute-launcher points ;;
         4) 
             # 检查是否已经配置了基本设置
-            if ! grep -q "model=" /root/.dria/dkn-compute-launcher/.env 2>/dev/null; then
+            # 使用临时文件存储配置检查结果
+            CONFIG_CHECK=$(mktemp)
+            dkn-compute-launcher settings get wallet &> "$CONFIG_CHECK"
+            dkn-compute-launcher settings get port &>> "$CONFIG_CHECK"
+            dkn-compute-launcher settings get models &>> "$CONFIG_CHECK"
+            
+            if ! grep -q "llama\|mistral\|codellama" "$CONFIG_CHECK" || ! grep -q "port" "$CONFIG_CHECK"; then
+                rm -f "$CONFIG_CHECK"
                 display_status "检测到未配置基本设置，请先进行配置" "warning"
                 # 直接进入设置界面
                 dkn-compute-launcher settings
                 return
             fi
+            rm -f "$CONFIG_CHECK"
             
             # 如果已经配置了基本设置，则继续处理推荐码
             display_status "正在配置推荐码管理环境..." "info"
