@@ -561,6 +561,144 @@ EOF
     display_status "网络诊断完成" "success"
 }
 
+# 创建超级修复工具
+create_superfix_tool() {
+    display_status "正在创建超级修复工具..." "info"
+    
+    cat > /usr/local/bin/dria-superfix << 'EOF'
+#!/bin/bash
+echo "正在执行超级修复..."
+
+# 检测是否在WSL环境中
+if grep -q "microsoft" /proc/version 2>/dev/null || grep -q "Microsoft" /proc/sys/kernel/osrelease 2>/dev/null; then
+    echo "检测到WSL环境，使用WSL特定配置..."
+    IS_WSL=true
+else
+    IS_WSL=false
+fi
+
+# 停止现有服务
+systemctl stop dria-node 2>/dev/null
+pkill -f dkn-compute-launcher
+sleep 2
+
+# 清理Docker资源
+if command -v docker &> /dev/null; then
+    echo "清理Docker资源..."
+    docker network prune -f
+    docker system prune -f
+    docker container prune -f
+fi
+
+# 修复DNS
+echo "修复DNS配置..."
+if [ "$IS_WSL" = true ]; then
+    # WSL环境使用Windows主机作为DNS
+    WIN_HOST_IP=$(ip route | grep default | awk '{print $3}')
+    if [ ! -z "$WIN_HOST_IP" ]; then
+        echo "nameserver $WIN_HOST_IP" > /etc/resolv.conf
+    fi
+fi
+echo "nameserver 8.8.8.8" >> /etc/resolv.conf
+echo "nameserver 1.1.1.1" >> /etc/resolv.conf
+
+# 添加hosts映射
+if ! grep -q "node1.dria.co" /etc/hosts; then
+    echo "添加节点IP映射..."
+    cat >> /etc/hosts << 'HOSTS'
+# Dria节点IP映射
+34.145.16.76 node1.dria.co
+34.42.109.93 node2.dria.co
+34.42.43.172 node3.dria.co
+35.200.247.78 node4.dria.co
+34.92.171.75 node5.dria.co
+HOSTS
+fi
+
+# 创建优化的网络配置
+echo "创建优化的网络配置..."
+mkdir -p /root/.dria
+
+# 获取本机IP
+LOCAL_IP=$(hostname -I | awk '{print $1}')
+if [ -z "$LOCAL_IP" ]; then
+    LOCAL_IP="0.0.0.0"
+fi
+
+# 根据环境创建不同的网络配置
+if [ "$IS_WSL" = true ]; then
+    # WSL环境配置
+    cat > /root/.dria/settings.json << EOL
+{
+    "network": {
+        "connection_timeout": 300,
+        "direct_connection_timeout": 20000,
+        "relay_connection_timeout": 60000,
+        "bootstrap_nodes": [
+            "/ip4/34.145.16.76/tcp/4001/p2p/QmXZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
+            "/ip4/34.42.109.93/tcp/4001/p2p/QmYZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
+            "/ip4/34.42.43.172/tcp/4001/p2p/QmZZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
+            "/ip4/35.200.247.78/tcp/4001/p2p/QmWZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
+            "/ip4/34.92.171.75/tcp/4001/p2p/QmVZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV"
+        ],
+        "listen_addresses": [
+            "/ip4/0.0.0.0/tcp/4001",
+            "/ip4/0.0.0.0/udp/4001/quic-v1"
+        ],
+        "external_addresses": [
+            "/ip4/$LOCAL_IP/tcp/4001",
+            "/ip4/$LOCAL_IP/udp/4001/quic-v1"
+        ]
+    }
+}
+EOL
+else
+    # 原生Linux环境配置
+    cat > /root/.dria/settings.json << EOL
+{
+    "network": {
+        "connection_timeout": 300,
+        "direct_connection_timeout": 20000,
+        "relay_connection_timeout": 60000,
+        "bootstrap_nodes": [
+            "/ip4/34.145.16.76/tcp/4001/p2p/QmXZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
+            "/ip4/34.42.109.93/tcp/4001/p2p/QmYZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
+            "/ip4/34.42.43.172/tcp/4001/p2p/QmZZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
+            "/ip4/35.200.247.78/tcp/4001/p2p/QmWZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
+            "/ip4/34.92.171.75/tcp/4001/p2p/QmVZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV"
+        ],
+        "listen_addresses": [
+            "/ip4/0.0.0.0/tcp/4001",
+            "/ip4/0.0.0.0/udp/4001/quic-v1"
+        ],
+        "external_addresses": [
+            "/ip4/$LOCAL_IP/tcp/4001",
+            "/ip4/$LOCAL_IP/udp/4001/quic-v1"
+        ]
+    }
+}
+EOL
+fi
+
+# 检查防火墙
+if command -v ufw &> /dev/null; then
+    echo "配置防火墙规则..."
+    ufw allow 4001/tcp
+    ufw allow 4001/udp
+    ufw allow 1337/tcp
+    ufw allow 11434/tcp
+fi
+
+# 启动节点
+echo "启动Dria节点..."
+export DKN_LOG=debug
+dkn-compute-launcher start
+EOF
+    
+    chmod +x /usr/local/bin/dria-superfix
+    display_status "超级修复工具创建完成" "success"
+}
+
 # WSL网络修复功能
 fix_wsl_network() {
     display_status "WSL网络修复工具" "info"
