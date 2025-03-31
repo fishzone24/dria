@@ -829,59 +829,45 @@ EOL
     dkn-compute-launcher start
 }
 
-# WSL网络修复功能
+# 修复WSL网络配置
 fix_wsl_network() {
-    display_status "WSL网络修复工具" "info"
+    display_status "开始修复WSL网络配置..." "info"
     
     # 检查是否在WSL环境中
-    if ! grep -qi "microsoft" /proc/version && ! grep -qi "microsoft" /proc/sys/kernel/osrelease; then
-        display_status "此功能仅适用于WSL环境" "error"
+    if ! grep -qi microsoft /proc/version; then
+        display_status "当前不在WSL环境中，跳过WSL网络修复" "warning"
         return 1
     fi
     
-    # 检查并配置防火墙
-    check_and_configure_firewall
-    
     # 停止现有服务
     display_status "停止现有服务..." "info"
-    systemctl stop dria-node 2>/dev/null
-    pkill -f dkn-compute-launcher
-    sleep 2
+    systemctl stop dria-node 2>/dev/null || true
+    docker-compose -f /root/.dria/docker-compose.yml down 2>/dev/null || true
     
     # 获取Windows主机IP
     display_status "获取Windows主机IP..." "info"
-    WIN_HOST_IP=$(ip route | grep default | awk '{print $3}')
-    if [ -z "$WIN_HOST_IP" ]; then
+    WINDOWS_IP=$(ip route | grep default | awk '{print $3}')
+    if [ -z "$WINDOWS_IP" ]; then
         display_status "无法获取Windows主机IP" "error"
         return 1
     fi
     
     # 修复DNS配置
     display_status "修复DNS配置..." "info"
-    echo "nameserver $WIN_HOST_IP" > /etc/resolv.conf
-    echo "nameserver 8.8.8.8" >> /etc/resolv.conf
-    echo "nameserver 1.1.1.1" >> /etc/resolv.conf
+    cat > /etc/resolv.conf << EOF
+nameserver 8.8.8.8
+nameserver 1.1.1.1
+EOF
     
     # 添加hosts映射
-    display_status "添加hosts映射..." "info"
-    if ! grep -q "node1.dria.co" /etc/hosts; then
-        cat >> /etc/hosts << 'EOF'
-# Dria节点IP映射
+    display_status "配置hosts映射..." "info"
+    cat >> /etc/hosts << EOF
 34.145.16.76 node1.dria.co
 34.42.109.93 node2.dria.co
 34.42.43.172 node3.dria.co
 35.200.247.78 node4.dria.co
 34.92.171.75 node5.dria.co
 EOF
-    fi
-    
-    # 获取WSL IP
-    display_status "获取WSL IP..." "info"
-    WSL_IP=$(hostname -I | awk '{print $1}')
-    if [ -z "$WSL_IP" ]; then
-        display_status "无法获取WSL IP" "error"
-        return 1
-    fi
     
     # 创建优化的网络配置
     display_status "创建优化的网络配置..." "info"
@@ -889,128 +875,75 @@ EOF
     cat > /root/.dria/settings.json << EOF
 {
     "network": {
-        "connection_timeout": 300,
-        "direct_connection_timeout": 20000,
-        "relay_connection_timeout": 60000,
-        "bootstrap_nodes": [
-            "/ip4/34.145.16.76/tcp/4001/p2p/QmXZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
-            "/ip4/34.42.109.93/tcp/4001/p2p/QmYZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
-            "/ip4/34.42.43.172/tcp/4001/p2p/QmZZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
-            "/ip4/35.200.247.78/tcp/4001/p2p/QmWZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
-            "/ip4/34.92.171.75/tcp/4001/p2p/QmVZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV"
-        ],
-        "listen_addresses": [
+        "external_multiaddrs": [
             "/ip4/0.0.0.0/tcp/4001",
-            "/ip4/0.0.0.0/udp/4001/quic-v1"
-        ],
-        "external_addresses": [
-            "/ip4/$WSL_IP/tcp/4001",
-            "/ip4/$WSL_IP/udp/4001/quic-v1"
+            "/ip4/0.0.0.0/udp/4001/quic"
         ],
         "enable_relay": true,
         "relay_discovery": true,
-        "relay_connection_timeout_ms": 60000,
-        "direct_connection_timeout_ms": 20000,
-        "connection_idle_timeout": 300,
-        "mesh_size": 8,
-        "target_mesh_size": 8,
-        "min_mesh_size": 4,
-        "max_mesh_size": 12,
-        "heartbeat_interval": 1000,
-        "heartbeat_timeout": 5000,
-        "gossip_factor": 0.25,
-        "d": 6,
-        "d_low": 4,
-        "d_high": 8,
-        "d_score": 4,
-        "d_out": 2,
-        "gossip_history_length": 5,
-        "gossip_history_gossip": 3,
-        "opportunistic_graft_ticks": 60,
-        "opportunistic_graft_peer_threshold": 0.1,
-        "graft_flood_threshold": 5,
-        "prune_peers": 16,
-        "prune_backoff": 1,
-        "unsubscribe_backoff": 60,
-        "connectors": 8,
-        "max_connections": 50,
-        "min_connections": 10,
-        "connection_timeout_ms": 10000,
-        "connection_retry_delay_ms": 1000,
-        "connection_retry_attempts": 5,
-        "connection_retry_factor": 1.5,
-        "connection_retry_max_delay_ms": 30000
+        "relay_connection_timeout": 60000,
+        "direct_connection_timeout": 20000,
+        "connection_timeout": 300,
+        "mesh": {
+            "enable": true,
+            "min_peers": 2,
+            "max_peers": 10,
+            "connection_timeout": 300,
+            "ping_interval": 30,
+            "ping_timeout": 10
+        }
+    },
+    "node": {
+        "enable_direct_connect": true,
+        "direct_connect_timeout": 20000,
+        "relay_connection_timeout": 60000,
+        "connection_timeout": 300,
+        "ping_interval": 30,
+        "ping_timeout": 10
     }
 }
 EOF
     
     # 创建Windows端口转发脚本
     display_status "创建Windows端口转发脚本..." "info"
-    cat > /tmp/setup_port_forward.ps1 << EOF
-# 删除现有端口转发
-netsh interface portproxy delete v4tov4 listenport=4001 listenaddress=0.0.0.0 2>\$null
-netsh interface portproxy delete v4tov4 listenport=1337 listenaddress=0.0.0.0 2>\$null
-netsh interface portproxy delete v4tov4 listenport=11434 listenaddress=0.0.0.0 2>\$null
+    cat > /root/.dria/wsl_port_forward.ps1 << EOF
+# 删除现有的端口转发规则
+netsh interface portproxy delete v4tov4 listenport=4001
+netsh interface portproxy delete v4tov4 listenport=1337
+netsh interface portproxy delete v4tov4 listenport=11434
 
-# 添加新的端口转发
-netsh interface portproxy add v4tov4 listenport=4001 listenaddress=0.0.0.0 connectport=4001 connectaddress=$WSL_IP
-netsh interface portproxy add v4tov4 listenport=1337 listenaddress=0.0.0.0 connectport=1337 connectaddress=$WSL_IP
-netsh interface portproxy add v4tov4 listenport=11434 listenaddress=0.0.0.0 connectport=11434 connectaddress=$WSL_IP
+# 添加新的端口转发规则
+netsh interface portproxy add v4tov4 listenport=4001 listenaddress=0.0.0.0 connectport=4001 connectaddress=$WINDOWS_IP
+netsh interface portproxy add v4tov4 listenport=1337 listenaddress=0.0.0.0 connectport=1337 connectaddress=$WINDOWS_IP
+netsh interface portproxy add v4tov4 listenport=11434 listenaddress=0.0.0.0 connectport=11434 connectaddress=$WINDOWS_IP
 
-# 添加防火墙规则
-New-NetFirewallRule -DisplayName "WSL-Dria-4001-TCP" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 4001 -ErrorAction SilentlyContinue
-New-NetFirewallRule -DisplayName "WSL-Dria-4001-UDP" -Direction Inbound -Action Allow -Protocol UDP -LocalPort 4001 -ErrorAction SilentlyContinue
-New-NetFirewallRule -DisplayName "WSL-Dria-1337-TCP" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 1337 -ErrorAction SilentlyContinue
-New-NetFirewallRule -DisplayName "WSL-Dria-11434-TCP" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 11434 -ErrorAction SilentlyContinue
+# 配置Windows防火墙规则
+New-NetFirewallRule -DisplayName "WSL-Dria-4001-TCP" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 4001
+New-NetFirewallRule -DisplayName "WSL-Dria-4001-UDP" -Direction Inbound -Action Allow -Protocol UDP -LocalPort 4001
+New-NetFirewallRule -DisplayName "WSL-Dria-1337-TCP" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 1337
+New-NetFirewallRule -DisplayName "WSL-Dria-11434-TCP" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 11434
 EOF
-    
-    # 尝试执行Windows脚本
-    display_status "尝试执行Windows端口转发脚本..." "info"
-    if command -v cmd.exe &>/dev/null; then
-        cmd.exe /c "powershell -ExecutionPolicy Bypass -File /tmp/setup_port_forward.ps1" 2>/dev/null || {
-            display_status "无法自动执行Windows脚本，请手动执行" "warning"
-            echo "请在Windows PowerShell(管理员)中执行以下命令："
-            echo "1. 打开PowerShell(管理员)"
-            echo "2. 复制并执行以下内容："
-            cat /tmp/setup_port_forward.ps1
-        }
-    else
-        display_status "无法执行Windows命令，请手动配置" "warning"
-        echo "请在Windows PowerShell(管理员)中执行以下命令："
-        echo "1. 打开PowerShell(管理员)"
-        echo "2. 复制并执行以下内容："
-        cat /tmp/setup_port_forward.ps1
-    fi
     
     # 检查Docker网络
     display_status "检查Docker网络..." "info"
-    if command -v docker &> /dev/null; then
-        docker network prune -f
-        docker system prune -f
-        docker container prune -f
+    if ! docker network inspect dria-network >/dev/null 2>&1; then
+        docker network create dria-network
     fi
     
-    # 启动Dria节点
-    display_status "启动Dria节点..." "info"
-    export DKN_LOG=debug
-    dkn-compute-launcher start
-    
-    # 等待节点启动
-    sleep 5
-    
-    # 检查节点状态
-    if pgrep -f dkn-compute-launcher > /dev/null; then
-        display_status "Dria节点已成功启动" "success"
-        echo "请等待几分钟让节点建立连接..."
-        echo "如果仍然没有连接，请尝试以下步骤："
-        echo "1. 在Windows PowerShell(管理员)中执行：wsl --shutdown"
-        echo "2. 重新打开WSL终端"
-        echo "3. 重新运行此工具"
+    # 尝试启动节点
+    display_status "尝试启动节点..." "info"
+    if docker-compose -f /root/.dria/docker-compose.yml up -d; then
+        display_status "节点启动成功" "success"
+        echo "请检查节点状态："
+        docker-compose -f /root/.dria/docker-compose.yml logs -f
     else
-        display_status "Dria节点启动失败，请检查日志" "error"
+        display_status "节点启动失败" "error"
+        return 1
     fi
     
     display_status "WSL网络修复完成" "success"
+    echo "请确保在Windows PowerShell中执行以下命令："
+    echo "powershell -ExecutionPolicy Bypass -File /root/.dria/wsl_port_forward.ps1"
 }
 
 # 修改 configure_wsl_network 函数，增加DNS修复和直接连接工具
@@ -2163,3 +2096,175 @@ fix_wsl_network() {
         return 1
     fi
 }
+
+# 修复网络配置
+fix_network() {
+    display_status "开始修复网络配置..." "info"
+    
+    # 停止现有服务
+    display_status "停止现有服务..." "info"
+    systemctl stop dria-node 2>/dev/null || true
+    docker-compose -f /root/.dria/docker-compose.yml down 2>/dev/null || true
+    
+    # 检查并安装必要的工具
+    display_status "检查并安装必要的工具..." "info"
+    apt update
+    apt install -y net-tools ufw iptables netcat
+    
+    # 检查端口占用
+    display_status "检查端口占用情况..." "info"
+    for port in 4001 1337 11434; do
+        if netstat -tuln | grep -q ":$port "; then
+            display_status "端口 $port 已被占用，正在尝试释放..." "warning"
+            pid=$(lsof -i :$port -t)
+            if [ ! -z "$pid" ]; then
+                kill -9 $pid
+                sleep 2
+            fi
+        fi
+    done
+    
+    # 配置防火墙
+    display_status "配置防火墙规则..." "info"
+    if command -v ufw &> /dev/null; then
+        ufw allow 4001/tcp
+        ufw allow 4001/udp
+        ufw allow 1337/tcp
+        ufw allow 11434/tcp
+        ufw reload
+    fi
+    
+    if command -v iptables &> /dev/null; then
+        iptables -A INPUT -p tcp --dport 4001 -j ACCEPT
+        iptables -A INPUT -p udp --dport 4001 -j ACCEPT
+        iptables -A INPUT -p tcp --dport 1337 -j ACCEPT
+        iptables -A INPUT -p tcp --dport 11434 -j ACCEPT
+    fi
+    
+    # 修复DNS配置
+    display_status "修复DNS配置..." "info"
+    cat > /etc/resolv.conf << EOF
+nameserver 8.8.8.8
+nameserver 1.1.1.1
+EOF
+    
+    # 添加hosts映射
+    display_status "配置hosts映射..." "info"
+    cat >> /etc/hosts << EOF
+34.145.16.76 node1.dria.co
+34.42.109.93 node2.dria.co
+34.42.43.172 node3.dria.co
+35.200.247.78 node4.dria.co
+34.92.171.75 node5.dria.co
+EOF
+    
+    # 创建优化的网络配置
+    display_status "创建优化的网络配置..." "info"
+    mkdir -p /root/.dria
+    cat > /root/.dria/settings.json << EOF
+{
+    "network": {
+        "external_multiaddrs": [
+            "/ip4/0.0.0.0/tcp/4001",
+            "/ip4/0.0.0.0/udp/4001/quic"
+        ],
+        "enable_relay": true,
+        "relay_discovery": true,
+        "relay_connection_timeout": 60000,
+        "direct_connection_timeout": 20000,
+        "connection_timeout": 300,
+        "mesh": {
+            "enable": true,
+            "min_peers": 2,
+            "max_peers": 10,
+            "connection_timeout": 300,
+            "ping_interval": 30,
+            "ping_timeout": 10
+        }
+    },
+    "node": {
+        "enable_direct_connect": true,
+        "direct_connect_timeout": 20000,
+        "relay_connection_timeout": 60000,
+        "connection_timeout": 300,
+        "ping_interval": 30,
+        "ping_timeout": 10
+    }
+}
+EOF
+    
+    # 检查Docker网络
+    display_status "检查Docker网络..." "info"
+    if ! docker network inspect dria-network >/dev/null 2>&1; then
+        docker network create dria-network
+    fi
+    
+    # 启动节点
+    display_status "启动节点..." "info"
+    if docker-compose -f /root/.dria/docker-compose.yml up -d; then
+        display_status "节点启动成功" "success"
+        echo "正在检查节点状态..."
+        docker-compose -f /root/.dria/docker-compose.yml logs -f
+    else
+        display_status "节点启动失败" "error"
+        return 1
+    fi
+    
+    display_status "网络修复完成" "success"
+    echo "请检查节点状态，如果仍然无法连接，请检查："
+    echo "1. 防火墙是否允许了所需端口"
+    echo "2. 是否有其他程序占用了端口"
+    echo "3. 使用 'netstat -tulpn | grep -E '4001|1337|11434' 检查端口状态"
+}
+
+# 主菜单
+show_menu() {
+    clear
+    echo -e "${BLUE}=== Dria 一键安装脚本 ===${NC}"
+    echo -e "${YELLOW}1. 安装 Dria${NC}"
+    echo -e "${YELLOW}2. 卸载 Dria${NC}"
+    echo -e "${YELLOW}3. 启动 Dria${NC}"
+    echo -e "${YELLOW}4. 停止 Dria${NC}"
+    echo -e "${YELLOW}5. 查看 Dria 状态${NC}"
+    echo -e "${YELLOW}6. 查看 Dria 日志${NC}"
+    echo -e "${YELLOW}7. 修复网络配置${NC}"
+    echo -e "${YELLOW}8. 退出${NC}"
+    echo -e "${BLUE}========================${NC}"
+}
+
+# 主循环
+while true; do
+    show_menu
+    read -p "请选择操作 (1-8): " choice
+    case $choice in
+        1)
+            install_dria
+            ;;
+        2)
+            uninstall_dria
+            ;;
+        3)
+            start_dria
+            ;;
+        4)
+            stop_dria
+            ;;
+        5)
+            check_dria_status
+            ;;
+        6)
+            view_dria_logs
+            ;;
+        7)
+            fix_network
+            ;;
+        8)
+            display_status "感谢使用！" "success"
+            exit 0
+            ;;
+        *)
+            display_status "无效的选择，请重试" "error"
+            ;;
+    esac
+    read -p "按回车键继续..."
+done
