@@ -894,8 +894,8 @@ EOF
         "external_addresses": [
             "/ip4/$WINDOWS_HOST_IP/tcp/4001",
             "/ip4/$WINDOWS_HOST_IP/udp/4001/quic-v1"
-    ]
-  }
+        ]
+    }
 }
 EOF
     
@@ -996,19 +996,19 @@ fi
 display_status "检查DNS配置..." "info"
 if ! ping -c 1 -W 2 node1.dria.co &>/dev/null; then
     display_status "检测到DNS问题，正在修复..." "warning"
-    cat > /etc/resolv.conf << EOF
+    cat > /etc/resolv.conf << DNSEOF
 nameserver 8.8.8.8
 nameserver 1.1.1.1
-EOF
+DNSEOF
     
     if ! grep -q "node1.dria.co" /etc/hosts; then
-        cat >> /etc/hosts << EOF
+        cat >> /etc/hosts << HOSTSEOF
 34.145.16.76 node1.dria.co
 34.42.109.93 node2.dria.co
 34.42.43.172 node3.dria.co
 35.200.247.78 node4.dria.co
 34.92.171.75 node5.dria.co
-EOF
+HOSTSEOF
     fi
 fi
 
@@ -1029,7 +1029,7 @@ display_status "Windows主机IP: $WINDOWS_HOST_IP" "info"
 # 更新优化的网络配置
 display_status "更新网络配置..." "info"
 mkdir -p /root/.dria
-cat > /root/.dria/settings.json << EOF
+cat > /root/.dria/settings.json << SETTINGSEOF
 {
     "network": {
         "enable_relay": true,
@@ -1059,7 +1059,7 @@ cat > /root/.dria/settings.json << EOF
         ]
     }
 }
-EOF
+SETTINGSEOF
 
 # 设置启动器配置
 display_status "配置dkn-compute-launcher..." "info"
