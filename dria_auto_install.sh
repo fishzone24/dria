@@ -904,6 +904,33 @@ EOF
 }
 EOF
     
+    # 创建docker-compose.yml文件
+    display_status "创建docker-compose.yml文件..." "info"
+    cat > /root/.dria/docker-compose.yml << EOF
+version: '3.8'
+
+services:
+  dria-node:
+    image: dria/dkn-compute-launcher:latest
+    container_name: dria-node
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - /root/.dria:/root/.dria
+    environment:
+      - DKN_LOG=debug
+    ports:
+      - "4001:4001"
+      - "1337:1337"
+      - "11434:11434"
+    command: start
+
+networks:
+  default:
+    name: dria-network
+    driver: bridge
+EOF
+    
     # 创建Windows端口转发脚本
     display_status "创建Windows端口转发脚本..." "info"
     cat > /root/.dria/wsl_port_forward.ps1 << EOF
