@@ -834,7 +834,7 @@ fix_wsl_network() {
     display_status "开始修复WSL网络配置..." "info"
     
     # 检查是否在WSL环境中
-    if ! grep -qi microsoft /proc/version; then
+    if ! grep -qi "microsoft" /proc/version; then
         display_status "当前不在WSL环境中，跳过WSL网络修复" "warning"
         return 1
     fi
@@ -2099,13 +2099,12 @@ EOF
                 fi
                 ;;
             [Ii])
-                display_status "正在创建直接IP连接工具..." "info"
                 create_direct_connect_tool
-                display_status "直接IP连接工具已创建，可以使用 'dria-direct' 命令启动" "success"
-                read -p "是否立即运行直接IP连接?(y/n): " run_direct
-                if [[ $run_direct == "y" || $run_direct == "Y" ]]; then
+                read -p "是否立即运行直接IP连接?(y/n): " run_now
+                if [[ $run_now =~ ^[Yy]$ ]]; then
                     /usr/local/bin/dria-direct
                 fi
+                read -p "按任意键返回主菜单..."
                 ;;
             [Ww])
                 display_status "正在运行WSL网络修复工具..." "info"
