@@ -2308,39 +2308,16 @@ if [ "$EUID" -ne 0 ]; then
     exit 1
 fi
 
-# 检查并安装docker-compose
-if ! command -v docker-compose &> /dev/null; then
-    display_status "未检测到docker-compose，开始安装..." "info"
-    
-    # 检查Docker是否已安装
-    if ! command -v docker &> /dev/null; then
-        display_status "未检测到Docker，无法安装docker-compose" "error"
-        exit 1
-    fi
-    
-    # 安装docker-compose
-    display_status "安装docker-compose..." "info"
-    apt update -y
-    apt install -y docker-compose
-    
-    # 验证安装
-    if ! command -v docker-compose &> /dev/null; then
-        display_status "docker-compose安装失败，尝试使用pip安装" "warning"
-        apt install -y python3-pip
-        pip3 install docker-compose
-        
-        if ! command -v docker-compose &> /dev/null; then
-            display_status "docker-compose安装失败，请手动安装后重试" "error"
-            exit 1
-        fi
-    fi
-    display_status "docker-compose安装成功" "success"
+# 检查dkn-compute-launcher是否安装
+if ! command -v dkn-compute-launcher &> /dev/null; then
+    display_status "未安装dkn-compute-launcher，请先安装" "error"
+    exit 1
 fi
 
 # 停止现有服务
 display_status "停止现有服务..." "info"
 systemctl stop dria-node 2>/dev/null || true
-docker-compose -f /root/.dria/docker-compose.yml down 2>/dev/null || true
+pkill -f dkn-compute-launcher
 
 # 获取本机IP
 LOCAL_IP=$(hostname -I | awk '{print $1}')
@@ -2376,79 +2353,25 @@ cat > /root/.dria/settings.json << EOL
 }
 EOL
 
-# 创建docker-compose.yml文件
-display_status "创建docker-compose.yml文件..." "info"
-cat > /root/.dria/docker-compose.yml << 'EOL'
-version: '3.8'
+display_status "直接IP网络配置已创建" "success"
+echo "✅ 配置详情:"
+echo "   - 使用本机IP: $LOCAL_IP"
+echo "   - 连接超时: 300秒"
+echo "   - 直接连接超时: 20000毫秒"
+echo "   - 中继连接超时: 60000毫秒"
+echo "   - 引导节点: 5个官方节点 (使用IP直接连接)"
+echo "   - 监听地址: 0.0.0.0:4001 (TCP/UDP)"
 
-services:
-  dria-node:
-    image: dria/dkn-compute-launcher:latest
-    container_name: dria-node
-    restart: unless-stopped
-    network_mode: host
-    volumes:
-      - /root/.dria:/root/.dria
-    environment:
-      - DKN_LOG=debug
-    ports:
-      - "4001:4001"
-      - "1337:1337"
-      - "11434:11434"
-    command: start
-    pull_policy: never
+# 配置dkn-compute-launcher
+display_status "配置dkn-compute-launcher启动参数..." "info"
+dkn-compute-launcher settings set docker.pull-policy IfNotPresent 2>/dev/null || true
 
-networks:
-  default:
-    name: dria-network
-    driver: bridge
-EOL
-
-# 确保文件权限正确
-chmod 644 /root/.dria/docker-compose.yml
-chown root:root /root/.dria/docker-compose.yml
-
-# 检查Docker网络
-display_status "检查Docker网络..." "info"
-if ! docker network inspect dria-network >/dev/null 2>&1; then
-    docker network create dria-network
-fi
-
-# 检查本地镜像
-if ! docker images | grep -q "dria/dkn-compute-launcher"; then
-    display_status "本地不存在Dria镜像，查找可用的替代镜像..." "warning"
-    
-    # 查找可能的替代镜像
-    ALT_IMAGE=$(docker images | grep -i "dria\|dkn" | head -n 1 | awk '{print $1":"$2}')
-    
-    if [ -n "$ALT_IMAGE" ]; then
-        display_status "找到替代镜像: $ALT_IMAGE，将使用该镜像" "info"
-        # 替换docker-compose.yml中的镜像
-        sed -i "s|image: dria/dkn-compute-launcher:latest|image: $ALT_IMAGE|g" /root/.dria/docker-compose.yml
-    else
-        display_status "未找到任何可用的Dria相关镜像，将尝试列出所有本地镜像" "warning"
-        echo "可用的本地镜像:"
-        docker images
-        
-        # 询问用户是否要使用本地某个镜像
-        read -p "请输入要使用的本地镜像名称（格式：name:tag，直接回车使用默认）: " USER_IMAGE
-        
-        if [ -n "$USER_IMAGE" ]; then
-            display_status "将使用镜像: $USER_IMAGE" "info"
-            sed -i "s|image: dria/dkn-compute-launcher:latest|image: $USER_IMAGE|g" /root/.dria/docker-compose.yml
-        else
-            display_status "未指定替代镜像，将尝试使用默认镜像" "warning"
-        fi
-    fi
-fi
-
-# 尝试启动节点
-display_status "尝试启动节点..." "info"
-if docker-compose -f /root/.dria/docker-compose.yml up -d; then
+# 启动节点
+display_status "启动Dria节点..." "info"
+export DKN_LOG=debug
+if dkn-compute-launcher start; then
     display_status "节点启动成功" "success"
-    echo "请检查节点状态："
-    docker-compose -f /root/.dria/docker-compose.yml logs | head -n 20
-    display_status "使用以下命令查看完整日志：docker-compose -f /root/.dria/docker-compose.yml logs -f" "info"
+    display_status "使用以下命令查看日志: dkn-compute-launcher logs -f" "info"
 else
     display_status "节点启动失败" "error"
     exit 1
