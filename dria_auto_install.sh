@@ -829,7 +829,7 @@ EOL
     dkn-compute-launcher start
 }
 
-# 修复WSL网络配置
+# WSL网络修复功能
 fix_wsl_network() {
     # 检查是否在WSL环境中
     if ! grep -qi "microsoft" /proc/version && ! grep -qi "microsoft" /proc/sys/kernel/osrelease; then
@@ -843,6 +843,7 @@ fix_wsl_network() {
     display_status "停止现有服务..." "info"
     systemctl stop dria-node 2>/dev/null || true
     docker-compose -f /root/.dria/docker-compose.yml down 2>/dev/null || true
+    pkill -f dkn-compute-launcher || true
     
     # 获取Windows主机IP
     display_status "获取Windows主机IP..." "info"
@@ -870,6 +871,35 @@ EOF
 35.200.247.78 node4.dria.co
 34.92.171.75 node5.dria.co
 EOF
+    fi
+    
+    # 检查dkn-compute-launcher是否存在
+    if ! command -v dkn-compute-launcher &> /dev/null; then
+        display_status "未检测到dkn-compute-launcher，尝试安装..." "warning"
+        
+        # 创建临时目录
+        TMP_DIR=$(mktemp -d)
+        cd "$TMP_DIR" || return 1
+        
+        # 尝试获取最新版本
+        LATEST_RELEASE=$(curl -s --connect-timeout 10 https://api.github.com/repos/firstbatchxyz/dkn-compute-launcher/releases/latest | grep "tag_name" | cut -d '"' -f 4)
+        if [ -z "$LATEST_RELEASE" ]; then
+            LATEST_RELEASE="v0.3.9"  # 使用默认版本
+        fi
+        
+        display_status "下载dkn-compute-launcher版本 $LATEST_RELEASE..." "info"
+        DOWNLOAD_URL="https://github.com/firstbatchxyz/dkn-compute-launcher/releases/download/${LATEST_RELEASE}/dkn-compute-launcher-linux-amd64"
+        
+        if ! wget --progress=dot:giga --timeout=60 "$DOWNLOAD_URL" -O dkn-compute-launcher; then
+            display_status "下载失败，无法安装dkn-compute-launcher" "error"
+            return 1
+        fi
+        
+        chmod +x dkn-compute-launcher
+        mv dkn-compute-launcher /usr/local/bin/
+        cd - > /dev/null
+        rm -rf "$TMP_DIR"
+        display_status "dkn-compute-launcher安装完成" "success"
     fi
     
     # 创建优化的网络配置
@@ -906,6 +936,10 @@ EOF
     }
 }
 EOF
+    
+    # 设置启动器配置
+    display_status "配置dkn-compute-launcher..." "info"
+    dkn-compute-launcher settings set docker.pull-policy IfNotPresent || true
     
     # 创建Windows端口转发脚本
     display_status "创建Windows端口转发脚本..." "info"
@@ -955,86 +989,181 @@ EOF
     WSL_PATH=$(wslpath -w /root/.dria/wsl_port_forward.ps1)
     echo "powershell.exe -ExecutionPolicy Bypass -File \"$WSL_PATH\""
     
-    # 检查Docker网络
-    display_status "检查Docker网络..." "info"
-    if ! docker network inspect dria-network >/dev/null 2>&1; then
-        docker network create dria-network
-    fi
-    
-    # 创建docker-compose.yml文件
-    display_status "创建docker-compose.yml文件..." "info"
-    cat > /root/.dria/docker-compose.yml << 'EOL'
-version: '3.8'
+    # 创建优化启动器脚本
+    display_status "创建优化启动器脚本..." "info"
+    cat > /usr/local/bin/dria-optimized << 'EOF'
+#!/bin/bash
 
-services:
-  dria-node:
-    image: dria/dkn-compute-launcher:latest
-    container_name: dria-node
-    restart: unless-stopped
-    network_mode: host
-    volumes:
-      - /root/.dria:/root/.dria
-    environment:
-      - DKN_LOG=debug
-    ports:
-      - "4001:4001"
-      - "1337:1337"
-      - "11434:11434"
-    command: start
-    pull_policy: never
+# 颜色定义
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
 
-networks:
-  default:
-    name: dria-network
-    driver: bridge
-EOL
+# 显示状态函数
+display_status() {
+    local message="$1"
+    local status="$2"
+    case $status in
+        "error")
+            echo -e "${RED}❌ 错误: ${message}${NC}"
+            ;;
+        "warning")
+            echo -e "${YELLOW}⚠️ 警告: ${message}${NC}"
+            ;;
+        "success")
+            echo -e "${GREEN}✅ 成功: ${message}${NC}"
+            ;;
+        "info")
+            echo -e "${BLUE}ℹ️ 信息: ${message}${NC}"
+            ;;
+        *)
+            echo -e "${message}"
+            ;;
+    esac
+}
+
+# 检查是否以root权限运行
+if [ "$EUID" -ne 0 ]; then 
+    display_status "请使用root权限运行此脚本" "error"
+    exit 1
+fi
+
+# 修复DNS问题
+display_status "检查DNS配置..." "info"
+if ! ping -c 1 -W 2 node1.dria.co &>/dev/null; then
+    display_status "检测到DNS问题，正在修复..." "warning"
+    cat > /etc/resolv.conf << EOF
+nameserver 8.8.8.8
+nameserver 1.1.1.1
+EOF
     
-    # 检查本地镜像
-    if ! docker images | grep -q "dria/dkn-compute-launcher"; then
-        display_status "本地不存在Dria镜像，查找可用的替代镜像..." "warning"
-        
-        # 查找可能的替代镜像
-        ALT_IMAGE=$(docker images | grep -i "dria\|dkn" | head -n 1 | awk '{print $1":"$2}')
-        
-        if [ -n "$ALT_IMAGE" ]; then
-            display_status "找到替代镜像: $ALT_IMAGE，将使用该镜像" "info"
-            # 替换docker-compose.yml中的镜像
-            sed -i "s|image: dria/dkn-compute-launcher:latest|image: $ALT_IMAGE|g" /root/.dria/docker-compose.yml
-        else
-            display_status "未找到任何可用的Dria相关镜像，将尝试列出所有本地镜像" "warning"
-            echo "可用的本地镜像:"
-            docker images
-            
-            # 询问用户是否要使用本地某个镜像
-            read -p "请输入要使用的本地镜像名称（格式：name:tag，直接回车使用默认）: " USER_IMAGE
-            
-            if [ -n "$USER_IMAGE" ]; then
-                display_status "将使用镜像: $USER_IMAGE" "info"
-                sed -i "s|image: dria/dkn-compute-launcher:latest|image: $USER_IMAGE|g" /root/.dria/docker-compose.yml
-            else
-                display_status "未指定替代镜像，将尝试使用默认镜像" "warning"
-            fi
-        fi
+    if ! grep -q "node1.dria.co" /etc/hosts; then
+        cat >> /etc/hosts << EOF
+34.145.16.76 node1.dria.co
+34.42.109.93 node2.dria.co
+34.42.43.172 node3.dria.co
+35.200.247.78 node4.dria.co
+34.92.171.75 node5.dria.co
+EOF
     fi
+fi
+
+# 停止现有服务
+display_status "停止现有服务..." "info"
+systemctl stop dria-node 2>/dev/null || true
+docker-compose -f /root/.dria/docker-compose.yml down 2>/dev/null || true
+pkill -f dkn-compute-launcher || true
+
+# 获取Windows主机IP
+WINDOWS_HOST_IP=$(ip route | grep default | awk '{print $3}')
+if [ -z "$WINDOWS_HOST_IP" ]; then
+    display_status "无法获取Windows主机IP，使用默认IP 172.16.0.1" "warning"
+    WINDOWS_HOST_IP="172.16.0.1"
+fi
+display_status "Windows主机IP: $WINDOWS_HOST_IP" "info"
+
+# 更新优化的网络配置
+display_status "更新网络配置..." "info"
+mkdir -p /root/.dria
+cat > /root/.dria/settings.json << EOF
+{
+    "network": {
+        "enable_relay": true,
+        "relay_discovery": true,
+        "connection_timeout": 300,
+        "direct_connection_timeout": 20000,
+        "relay_connection_timeout": 60000,
+        "mesh": {
+            "high": 20,
+            "low": 5,
+            "target": 10
+        },
+        "bootstrap_nodes": [
+            "/ip4/34.145.16.76/tcp/4001/p2p/QmXZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
+            "/ip4/34.42.109.93/tcp/4001/p2p/QmYZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
+            "/ip4/34.42.43.172/tcp/4001/p2p/QmZZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
+            "/ip4/35.200.247.78/tcp/4001/p2p/QmWZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
+            "/ip4/34.92.171.75/tcp/4001/p2p/QmVZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV"
+        ],
+        "listen_addresses": [
+            "/ip4/0.0.0.0/tcp/4001",
+            "/ip4/0.0.0.0/udp/4001/quic-v1"
+        ],
+        "external_addresses": [
+            "/ip4/$WINDOWS_HOST_IP/tcp/4001",
+            "/ip4/$WINDOWS_HOST_IP/udp/4001/quic-v1"
+        ]
+    }
+}
+EOF
+
+# 设置启动器配置
+display_status "配置dkn-compute-launcher..." "info"
+dkn-compute-launcher settings set docker.pull-policy IfNotPresent || true
+
+# 提示端口转发
+display_status "确保已执行Windows端口转发脚本！" "warning"
+WSL_PATH=$(wslpath -w /root/.dria/wsl_port_forward.ps1 2>/dev/null)
+if [ -n "$WSL_PATH" ]; then
+    echo "powershell.exe -ExecutionPolicy Bypass -File \"$WSL_PATH\""
+fi
+
+# 启动节点
+display_status "正在启动Dria节点..." "info"
+export DKN_LOG=debug
+dkn-compute-launcher start
+EOF
     
-    # 尝试启动节点
-    display_status "尝试启动节点..." "info"
-    if docker-compose -f /root/.dria/docker-compose.yml up -d; then
-        display_status "节点启动成功" "success"
-        echo "请检查节点状态："
-        docker-compose -f /root/.dria/docker-compose.yml logs | head -n 20
-        display_status "使用以下命令查看完整日志：docker-compose -f /root/.dria/docker-compose.yml logs -f" "info"
-        
-        # 提示用户检查Windows端口转发
-        display_status "重要: 请确保您已在Windows中执行端口转发脚本！" "warning"
-        WSL_PATH=$(wslpath -w /root/.dria/wsl_port_forward.ps1)
-        echo "powershell.exe -ExecutionPolicy Bypass -File \"$WSL_PATH\""
+    chmod +x /usr/local/bin/dria-optimized
+    
+    # 创建服务文件
+    display_status "创建系统服务..." "info"
+    cat > /etc/systemd/system/dria-node.service << EOF
+[Unit]
+Description=Dria Compute Node
+After=network.target docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/local/bin/dria-optimized
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    
+    systemctl daemon-reload
+    systemctl enable dria-node.service
+    
+    # 提示用户执行端口转发
+    display_status "请在Windows中执行端口转发脚本！" "warning"
+    display_status "在Windows PowerShell(管理员)中执行:" "info"
+    WSL_PATH=$(wslpath -w /root/.dria/wsl_port_forward.ps1)
+    echo "powershell.exe -ExecutionPolicy Bypass -File \"$WSL_PATH\""
+    
+    # 询问是否立即启动节点
+    read -p "是否立即启动节点? (y/n): " START_NODE
+    if [[ $START_NODE == "y" || $START_NODE == "Y" ]]; then
+        display_status "启动Dria节点..." "info"
+        systemctl start dria-node
+        display_status "已启动Dria节点，您可以使用'journalctl -u dria-node -f'查看日志" "success"
     else
-        display_status "节点启动失败" "error"
-        return 1
+        display_status "您可以稍后使用'systemctl start dria-node'启动节点" "info"
     fi
     
     display_status "WSL网络修复完成" "success"
+    display_status "重要提示：确保在Windows中执行端口转发脚本，否则外部无法连接到您的节点" "warning"
+    display_status "您可以使用以下命令管理节点:" "info"
+    echo "- 启动节点: systemctl start dria-node"
+    echo "- 停止节点: systemctl stop dria-node"
+    echo "- 查看日志: journalctl -u dria-node -f"
+    echo "- 手动启动: dria-optimized"
+    
     return 0
 }
 
