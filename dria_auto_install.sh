@@ -2099,48 +2099,10 @@ EOF
                 fi
                 ;;
             [Ii])
-                create_direct_connect_tool
-                read -p "是否立即运行直接IP连接?(y/n): " run_now
-                if [[ $run_now =~ ^[Yy]$ ]]; then
-                    /usr/local/bin/dria-direct
-                fi
-                read -p "按任意键返回主菜单..."
-                ;;
-            [Ww])
-                display_status "正在运行WSL网络修复工具..." "info"
-                fix_wsl_network
-                display_status "WSL网络修复完成" "success"
-                read -n 1 -s -r -p "按任意键继续..."
-                ;;
-            0) exit 0 ;;
-            *) display_status "无效选项，请重试。" "error" ;;
-        esac
-        read -n 1 -s -r -p "按任意键返回主菜单..."
-    done
-}
-
-# 执行脚本
-initialize      # 快速初始化
-init_network_check  # 网络检测在后台进行
-display_info
-source "$0" # 确保所有函数已加载
-main_menu
-
-# WSL网络修复功能
-fix_wsl_network() {
-    # 检查是否在WSL环境中
-    if ! grep -qi "microsoft" /proc/version && ! grep -qi "microsoft" /proc/sys/kernel/osrelease; then
-        display_status "此功能仅适用于WSL环境" "error"
-        return 1
-    fi
-}
-
-# 创建直接IP连接工具
-create_direct_connect_tool() {
-    display_status "创建直接IP连接工具..." "info"
-    
-    # 创建工具脚本
-    cat > /usr/local/bin/dria-direct << 'EOF'
+                display_status "创建直接IP连接工具..." "info"
+                
+                # 创建工具脚本
+                cat > /usr/local/bin/dria-direct << 'EOF'
 #!/bin/bash
 
 # 颜色定义
@@ -2174,7 +2136,7 @@ display_status() {
 }
 
 # 检查是否以root权限运行
-if [ "$EUID" -ne 0 ]; then
+if [ "$EUID" -ne 0 ]; then 
     display_status "请使用root权限运行此脚本" "error"
     exit 1
 fi
@@ -2233,10 +2195,176 @@ services:
       - /root/.dria:/root/.dria
     environment:
       - DKN_LOG=debug
-      # 添加代理环境变量 (如果设置了)
-      - HTTP_PROXY=${http_proxy:-}
-      - HTTPS_PROXY=${https_proxy:-}
-      - NO_PROXY=localhost,127.0.0.1,host.docker.internal
+    ports:
+      - "4001:4001"
+      - "1337:1337"
+      - "11434:11434"
+    command: start
+
+networks:
+  default:
+    name: dria-network
+    driver: bridge
+EOL
+
+# 确保文件权限正确
+chmod 644 /root/.dria/docker-compose.yml
+chown root:root /root/.dria/docker-compose.yml
+
+# 检查Docker网络
+display_status "检查Docker网络..." "info"
+if ! docker network inspect dria-network >/dev/null 2>&1; then
+    docker network create dria-network
+fi
+
+# 尝试启动节点
+display_status "尝试启动节点..." "info"
+if docker-compose -f /root/.dria/docker-compose.yml up -d; then
+    display_status "节点启动成功" "success"
+    echo "请检查节点状态："
+    docker-compose -f /root/.dria/docker-compose.yml logs -f
+else
+    display_status "节点启动失败" "error"
+    exit 1
+fi
+EOF
+
+                # 设置执行权限
+                chmod +x /usr/local/bin/dria-direct
+                display_status "直接IP连接工具已创建，可以使用 'dria-direct' 命令启动" "success"
+                
+                read -p "是否立即运行直接IP连接?(y/n): " run_direct
+                if [[ $run_direct == "y" || $run_direct == "Y" ]]; then
+                    /usr/local/bin/dria-direct
+                fi
+                read -p "按任意键返回主菜单..."
+                ;;
+            [Ww])
+                display_status "正在运行WSL网络修复工具..." "info"
+                fix_wsl_network
+                display_status "WSL网络修复完成" "success"
+                read -n 1 -s -r -p "按任意键继续..."
+                ;;
+            0) exit 0 ;;
+            *) display_status "无效选项，请重试。" "error" ;;
+        esac
+        read -n 1 -s -r -p "按任意键返回主菜单..."
+    done
+}
+
+# 执行脚本
+initialize      # 快速初始化
+init_network_check  # 网络检测在后台进行
+display_info
+main_menu
+
+# WSL网络修复功能
+fix_wsl_network() {
+    # 检查是否在WSL环境中
+    if ! grep -qi "microsoft" /proc/version && ! grep -qi "microsoft" /proc/sys/kernel/osrelease; then
+        display_status "此功能仅适用于WSL环境" "error"
+        return 1
+    fi
+}
+
+# 创建直接IP连接工具
+create_direct_connect_tool() {
+    display_status "创建直接IP连接工具..." "info"
+    
+    # 创建工具脚本
+    cat > /usr/local/bin/dria-direct << 'EOF'
+#!/bin/bash
+
+# 颜色定义
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+# 显示状态函数
+display_status() {
+    local message="$1"
+    local status="$2"
+    case $status in
+        "error")
+            echo -e "${RED}❌ 错误: ${message}${NC}"
+            ;;
+        "warning")
+            echo -e "${YELLOW}⚠️ 警告: ${message}${NC}"
+            ;;
+        "success")
+            echo -e "${GREEN}✅ 成功: ${message}${NC}"
+            ;;
+        "info")
+            echo -e "${BLUE}ℹ️ 信息: ${message}${NC}"
+            ;;
+        *)
+            echo -e "${message}"
+            ;;
+    esac
+}
+
+# 检查是否以root权限运行
+if [ "$EUID" -ne 0 ]; then 
+    display_status "请使用root权限运行此脚本" "error"
+    exit 1
+fi
+
+# 停止现有服务
+display_status "停止现有服务..." "info"
+systemctl stop dria-node 2>/dev/null || true
+docker-compose -f /root/.dria/docker-compose.yml down 2>/dev/null || true
+
+# 获取本机IP
+LOCAL_IP=$(hostname -I | awk '{print $1}')
+if [ -z "$LOCAL_IP" ]; then
+    LOCAL_IP="0.0.0.0"
+fi
+
+# 创建优化的网络配置
+display_status "创建优化的网络配置..." "info"
+mkdir -p /root/.dria
+cat > /root/.dria/settings.json << EOL
+{
+    "network": {
+        "connection_timeout": 300,
+        "direct_connection_timeout": 20000,
+        "relay_connection_timeout": 60000,
+        "bootstrap_nodes": [
+            "/ip4/34.145.16.76/tcp/4001/p2p/QmXZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
+            "/ip4/34.42.109.93/tcp/4001/p2p/QmYZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
+            "/ip4/34.42.43.172/tcp/4001/p2p/QmZZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
+            "/ip4/35.200.247.78/tcp/4001/p2p/QmWZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
+            "/ip4/34.92.171.75/tcp/4001/p2p/QmVZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV"
+        ],
+        "listen_addresses": [
+            "/ip4/0.0.0.0/tcp/4001",
+            "/ip4/0.0.0.0/udp/4001/quic-v1"
+        ],
+        "external_addresses": [
+            "/ip4/$LOCAL_IP/tcp/4001",
+            "/ip4/$LOCAL_IP/udp/4001/quic-v1"
+        ]
+    }
+}
+EOL
+
+# 创建docker-compose.yml文件
+display_status "创建docker-compose.yml文件..." "info"
+cat > /root/.dria/docker-compose.yml << 'EOL'
+version: '3.8'
+
+services:
+  dria-node:
+    image: dria/dkn-compute-launcher:latest
+    container_name: dria-node
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - /root/.dria:/root/.dria
+    environment:
+      - DKN_LOG=debug
     ports:
       - "4001:4001"
       - "1337:1337"
