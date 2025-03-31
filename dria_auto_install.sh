@@ -1342,7 +1342,17 @@ manage_dria_node() {
         1) dkn-compute-launcher start ;;
         2) dkn-compute-launcher settings ;;
         3) dkn-compute-launcher points ;;
-        4) dkn-compute-launcher referrals ;;
+        4) 
+            display_status "正在配置推荐码管理环境..." "info"
+            # 创建必要的目录
+            mkdir -p /root/.dria/dkn-compute-launcher
+            # 创建环境文件
+            touch /root/.dria/dkn-compute-launcher/.env
+            # 设置基本权限
+            chmod 600 /root/.dria/dkn-compute-launcher/.env
+            # 现在执行推荐码管理
+            dkn-compute-launcher referrals
+            ;;
         5) dkn-compute-launcher measure ;;
         6) dkn-compute-launcher update ;;
         7) dkn-compute-launcher uninstall ;;
