@@ -2163,6 +2163,35 @@ if [ "$EUID" -ne 0 ]; then
     exit 1
 fi
 
+# 检查并安装docker-compose
+if ! command -v docker-compose &> /dev/null; then
+    display_status "未检测到docker-compose，开始安装..." "info"
+    
+    # 检查Docker是否已安装
+    if ! command -v docker &> /dev/null; then
+        display_status "未检测到Docker，无法安装docker-compose" "error"
+        exit 1
+    fi
+    
+    # 安装docker-compose
+    display_status "安装docker-compose..." "info"
+    apt update -y
+    apt install -y docker-compose
+    
+    # 验证安装
+    if ! command -v docker-compose &> /dev/null; then
+        display_status "docker-compose安装失败，尝试使用pip安装" "warning"
+        apt install -y python3-pip
+        pip3 install docker-compose
+        
+        if ! command -v docker-compose &> /dev/null; then
+            display_status "docker-compose安装失败，请手动安装后重试" "error"
+            exit 1
+        fi
+    fi
+    display_status "docker-compose安装成功" "success"
+fi
+
 # 停止现有服务
 display_status "停止现有服务..." "info"
 systemctl stop dria-node 2>/dev/null || true
@@ -2244,24 +2273,25 @@ display_status "尝试启动节点..." "info"
 if docker-compose -f /root/.dria/docker-compose.yml up -d; then
     display_status "节点启动成功" "success"
     echo "请检查节点状态："
-    docker-compose -f /root/.dria/docker-compose.yml logs -f
+    docker-compose -f /root/.dria/docker-compose.yml logs | head -n 20
+    display_status "使用以下命令查看完整日志：docker-compose -f /root/.dria/docker-compose.yml logs -f" "info"
 else
     display_status "节点启动失败" "error"
     exit 1
 fi
 EOF
 
-            # 设置执行权限
-            chmod +x /usr/local/bin/dria-direct
-            display_status "直接IP连接工具已创建，可以使用 'dria-direct' 命令启动" "success"
+                # 设置执行权限
+                chmod +x /usr/local/bin/dria-direct
+                display_status "直接IP连接工具已创建，可以使用 'dria-direct' 命令启动" "success"
                 
-            read -p "是否立即运行直接IP连接?(y/n): " run_direct
-            if [[ $run_direct == "y" || $run_direct == "Y" ]]; then
-                /usr/local/bin/dria-direct
-            fi
-            read -n 1 -s -r -p "按任意键返回主菜单..."
-            main_menu
-            ;;
+                read -p "是否立即运行直接IP连接?(y/n): " run_direct
+                if [[ $run_direct == "y" || $run_direct == "Y" ]]; then
+                    /usr/local/bin/dria-direct
+                fi
+                read -n 1 -s -r -p "按任意键返回主菜单..."
+                main_menu
+                ;;
         [Ww])
             display_status "正在运行WSL网络修复工具..." "info"
             fix_wsl_network
