@@ -92,6 +92,74 @@ fi
 # 确保脚本有执行权限
 chmod +x "$0"
 
+# Ollama Docker修复函数
+fix_ollama_docker() {
+    display_status "Ollama Docker环境修复工具" "info"
+    
+    # 检查Docker是否运行
+    if ! docker ps &>/dev/null; then
+        display_status "Docker服务未运行" "error"
+        return 1
+    fi
+    
+    # 检查Ollama容器是否运行
+    if ! docker ps | grep -q "ollama"; then
+        display_status "未检测到运行中的Ollama容器" "error"
+        return 1
+    fi
+    
+    # 创建必要的目录结构
+    display_status "创建Ollama必要目录..." "info"
+    mkdir -p /root/.ollama/models
+    chmod -R 755 /root/.ollama
+    chown -R root:root /root/.ollama
+    
+    # 获取Ollama容器ID
+    OLLAMA_CONTAINER=$(docker ps | grep ollama | awk '{print $1}')
+    
+    if [ -z "$OLLAMA_CONTAINER" ]; then
+        display_status "无法获取Ollama容器ID" "error"
+        return 1
+    fi
+    
+    display_status "检测到Ollama容器: $OLLAMA_CONTAINER" "info"
+    
+    # 创建临时脚本
+    cat > /tmp/fix_ollama.sh << 'EOF'
+#!/bin/bash
+mkdir -p /root/.ollama/models
+chmod -R 755 /root/.ollama
+chown -R root:root /root/.ollama
+EOF
+    chmod +x /tmp/fix_ollama.sh
+    
+    # 将脚本复制到容器内并执行
+    display_status "在Ollama容器内执行修复..." "info"
+    docker cp /tmp/fix_ollama.sh $OLLAMA_CONTAINER:/tmp/
+    docker exec $OLLAMA_CONTAINER /bin/bash /tmp/fix_ollama.sh
+    
+    # 重启Ollama容器
+    display_status "重启Ollama容器..." "info"
+    docker restart $OLLAMA_CONTAINER
+    
+    # 等待Ollama服务重新启动
+    sleep 5
+    
+    # 检查Ollama服务是否正常
+    if curl -s http://localhost:11434/api/tags >/dev/null; then
+        display_status "Ollama服务已恢复正常" "success"
+    else
+        display_status "Ollama服务可能仍有问题，请检查Docker日志" "warning"
+        echo "可以使用以下命令查看日志："
+        echo "docker logs $OLLAMA_CONTAINER"
+    fi
+    
+    # 清理临时文件
+    rm -f /tmp/fix_ollama.sh
+    
+    return 0
+}
+
 # 更新系统并安装依赖项
 setup_prerequisites() {
     display_status "检查并安装所需的系统依赖项..." "info"
@@ -605,8 +673,51 @@ if [ "$IS_WSL" = true ]; then
             "/ip4/34.42.109.93/tcp/4001/p2p/QmYZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
             "/ip4/34.42.43.172/tcp/4001/p2p/QmZZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
             "/ip4/35.200.247.78/tcp/4001/p2p/QmWZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
-            "/ip4/34.92.171.75/tcp/4001/p2p/QmVZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV"
-        ]
+            "/ip4/34.92.171.75/tcp/4001/p2p/QmVZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
+            "/ip4/98.85.74.179/tcp/4001/p2p/16Uiu2HAmH4YGRWuJSvo5bxdShozKSve1WaZMGzAr3GiNNzadsdaN",
+            "/ip4/52.73.119.21/tcp/4001/p2p/16Uiu2HAmAYyZ69AXRfVHvp887ZTt5R2hm3ipHRJcDnaVCr3KB9qM"
+        ],
+        "listen_addresses": [
+            "/ip4/0.0.0.0/tcp/4001",
+            "/ip4/0.0.0.0/udp/4001/quic-v1"
+        ],
+        "external_addresses": [
+            "/ip4/$LOCAL_IP/tcp/4001",
+            "/ip4/$LOCAL_IP/udp/4001/quic-v1"
+        ],
+        "enable_relay": true,
+        "relay_discovery": true,
+        "relay_connection_timeout_ms": 60000,
+        "direct_connection_timeout_ms": 20000,
+        "connection_idle_timeout": 300,
+        "mesh_size": 8,
+        "target_mesh_size": 8,
+        "min_mesh_size": 4,
+        "max_mesh_size": 12,
+        "heartbeat_interval": 1000,
+        "heartbeat_timeout": 5000,
+        "gossip_factor": 0.25,
+        "d": 6,
+        "d_low": 4,
+        "d_high": 8,
+        "d_score": 4,
+        "d_out": 2,
+        "gossip_history_length": 5,
+        "gossip_history_gossip": 3,
+        "opportunistic_graft_ticks": 60,
+        "opportunistic_graft_peer_threshold": 0.1,
+        "graft_flood_threshold": 5,
+        "prune_peers": 16,
+        "prune_backoff": 1,
+        "unsubscribe_backoff": 60,
+        "connectors": 8,
+        "max_connections": 50,
+        "min_connections": 10,
+        "connection_timeout_ms": 10000,
+        "connection_retry_delay_ms": 1000,
+        "connection_retry_attempts": 5,
+        "connection_retry_factor": 1.5,
+        "connection_retry_max_delay_ms": 30000
     }
 }
 EOL
@@ -623,7 +734,9 @@ else
             "/ip4/34.42.109.93/tcp/4001/p2p/QmYZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
             "/ip4/34.42.43.172/tcp/4001/p2p/QmZZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
             "/ip4/35.200.247.78/tcp/4001/p2p/QmWZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
-            "/ip4/34.92.171.75/tcp/4001/p2p/QmVZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV"
+            "/ip4/34.92.171.75/tcp/4001/p2p/QmVZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
+            "/ip4/98.85.74.179/tcp/4001/p2p/16Uiu2HAmH4YGRWuJSvo5bxdShozKSve1WaZMGzAr3GiNNzadsdaN",
+            "/ip4/52.73.119.21/tcp/4001/p2p/16Uiu2HAmAYyZ69AXRfVHvp887ZTt5R2hm3ipHRJcDnaVCr3KB9qM"
         ],
         "listen_addresses": [
             "/ip4/0.0.0.0/tcp/4001",
@@ -632,7 +745,40 @@ else
         "external_addresses": [
             "/ip4/$LOCAL_IP/tcp/4001",
             "/ip4/$LOCAL_IP/udp/4001/quic-v1"
-        ]
+        ],
+        "enable_relay": true,
+        "relay_discovery": true,
+        "relay_connection_timeout_ms": 60000,
+        "direct_connection_timeout_ms": 20000,
+        "connection_idle_timeout": 300,
+        "mesh_size": 8,
+        "target_mesh_size": 8,
+        "min_mesh_size": 4,
+        "max_mesh_size": 12,
+        "heartbeat_interval": 1000,
+        "heartbeat_timeout": 5000,
+        "gossip_factor": 0.25,
+        "d": 6,
+        "d_low": 4,
+        "d_high": 8,
+        "d_score": 4,
+        "d_out": 2,
+        "gossip_history_length": 5,
+        "gossip_history_gossip": 3,
+        "opportunistic_graft_ticks": 60,
+        "opportunistic_graft_peer_threshold": 0.1,
+        "graft_flood_threshold": 5,
+        "prune_peers": 16,
+        "prune_backoff": 1,
+        "unsubscribe_backoff": 60,
+        "connectors": 8,
+        "max_connections": 50,
+        "min_connections": 10,
+        "connection_timeout_ms": 10000,
+        "connection_retry_delay_ms": 1000,
+        "connection_retry_attempts": 5,
+        "connection_retry_factor": 1.5,
+        "connection_retry_max_delay_ms": 30000
     }
 }
 EOL
@@ -1180,6 +1326,18 @@ manage_dria_node() {
         fi
     fi
     
+    # 创建必要的目录和文件
+    mkdir -p /root/.dria/dkn-compute-launcher
+    if [ ! -f /root/.dria/dkn-compute-launcher/.env ]; then
+        touch /root/.dria/dkn-compute-launcher/.env
+        chmod 600 /root/.dria/dkn-compute-launcher/.env
+    fi
+    
+    # 确保目录和文件权限正确
+    chown -R root:root /root/.dria
+    chmod -R 700 /root/.dria
+    chmod 600 /root/.dria/dkn-compute-launcher/.env
+    
     echo -e "${MENU_COLOR}请选择操作:${NORMAL}"
     echo -e "${MENU_COLOR}1. 启动 Dria 节点${NORMAL}"
     echo -e "${MENU_COLOR}2. 配置 Dria 节点设置${NORMAL}"
@@ -1196,7 +1354,31 @@ manage_dria_node() {
         1) dkn-compute-launcher start ;;
         2) dkn-compute-launcher settings ;;
         3) dkn-compute-launcher points ;;
-        4) dkn-compute-launcher referrals ;;
+        4) 
+            # 检查是否已经配置了基本设置
+            CONFIG_CHECK=$(mktemp)
+            # 检查钱包配置
+            if ! dkn-compute-launcher settings get wallet &> "$CONFIG_CHECK" || ! grep -q "[a-zA-Z0-9]" "$CONFIG_CHECK"; then
+                rm -f "$CONFIG_CHECK"
+                display_status "检测到未配置钱包，请先进行配置" "warning"
+                dkn-compute-launcher settings
+                return
+            fi
+            
+            # 检查模型配置
+            if ! dkn-compute-launcher settings get models &> "$CONFIG_CHECK" || ! grep -q "llama\|mistral\|codellama" "$CONFIG_CHECK"; then
+                rm -f "$CONFIG_CHECK"
+                display_status "检测到未配置模型，请先进行配置" "warning"
+                dkn-compute-launcher settings
+                return
+            fi
+            
+            rm -f "$CONFIG_CHECK"
+            
+            # 如果已经配置了基本设置，则继续处理推荐码
+            display_status "正在配置推荐码管理环境..." "info"
+            dkn-compute-launcher referrals
+            ;;
         5) dkn-compute-launcher measure ;;
         6) dkn-compute-launcher update ;;
         7) dkn-compute-launcher uninstall ;;
@@ -1556,9 +1738,26 @@ init_network_check() {
 # 显示脚本信息
 display_info() {
     clear
-    echo -e "${INFO_COLOR}${BOLD}=========================================================================${NORMAL}"
-    echo -e "${INFO_COLOR}${BOLD}                     Dria 计算节点自动安装脚本                           ${NORMAL}"
-    echo -e "${INFO_COLOR}${BOLD}=========================================================================${NORMAL}"
+    # 添加署名信息
+    cat << "EOF"
+
+   __   _         _                                    ___    _  _   
+  / _| (_)       | |                                  |__ \  | || |  
+ | |_   _   ___  | |__    ____   ___    _ __     ___     ) | | || |_ 
+ |  _| | | / __| | '_ \  |_  /  / _ \  | '_ \   / _ \   / /  |__   _|
+ | |   | | \__ \ | | | |  / /  | (_) | | | | | |  __/  / /_     | |  
+ |_|   |_| |___/ |_| |_| /___|  \___/  |_| |_|  \___| |____|    |_|  
+                                                                     
+                                                                     
+
+                                                                                                                                  
+
+EOF
+    echo -e "${BLUE}==================================================================${RESET}"
+    echo -e "${GREEN}Dria 节点一键管理脚本${RESET}"
+    echo -e "${YELLOW}脚本作者: fishzone24 - 推特: https://x.com/fishzone24${RESET}"
+    echo -e "${YELLOW}此脚本为免费开源脚本，如有问题请提交 issue${RESET}"
+    echo -e "${BLUE}==================================================================${RESET}"
     echo -e ""
     echo -e "${INFO_COLOR}此脚本将帮助您在 Ubuntu 系统上自动安装和配置 Dria 计算节点。${NORMAL}"
     
@@ -1610,6 +1809,27 @@ display_info() {
 main_menu() {
     while true; do
         clear
+        # 添加署名信息
+        cat << "EOF"
+
+   __   _         _                                    ___    _  _   
+  / _| (_)       | |                                  |__ \  | || |  
+ | |_   _   ___  | |__    ____   ___    _ __     ___     ) | | || |_ 
+ |  _| | | / __| | '_ \  |_  /  / _ \  | '_ \   / _ \   / /  |__   _|
+ | |   | | \__ \ | | | |  / /  | (_) | | | | | |  __/  / /_     | |  
+ |_|   |_| |___/ |_| |_| /___|  \___/  |_| |_|  \___| |____|    |_|  
+                                                                     
+                                                                     
+
+                                                                                                                                  
+
+EOF
+        echo -e "${BLUE}==================================================================${RESET}"
+        echo -e "${GREEN}Dria 节点一键管理脚本${RESET}"
+        echo -e "${YELLOW}脚本作者: fishzone24 - 推特: https://x.com/fishzone24${RESET}"
+        echo -e "${YELLOW}此脚本为免费开源脚本，如有问题请提交 issue${RESET}"
+        echo -e "${BLUE}==================================================================${RESET}"
+        
         # 显示运行环境
         if [ "$ENV_TYPE" = "wsl" ]; then
             display_status "当前运行在Windows Subsystem for Linux (WSL)环境中" "info"
@@ -1639,17 +1859,18 @@ main_menu() {
         echo -e "${MENU_COLOR}8. 设置网络代理${NORMAL}"
         echo -e "${MENU_COLOR}9. 清除网络代理${NORMAL}"
         echo -e "${MENU_COLOR}H. Ollama修复工具${NORMAL}"
+        echo -e "${MENU_COLOR}O. Ollama Docker修复${NORMAL}"  # 添加新选项
         echo -e "${MENU_COLOR}D. DNS修复工具${NORMAL}"
         echo -e "${MENU_COLOR}F. 超级修复工具${NORMAL}"
         echo -e "${MENU_COLOR}I. 直接IP连接${NORMAL}"
         
         # WSL特定选项
         if [ "$ENV_TYPE" = "wsl" ]; then
-            echo -e "${MENU_COLOR}W. WSL网络优化配置${NORMAL}"
+            echo -e "${MENU_COLOR}W. WSL网络修复工具${NORMAL}"
         fi
         
         echo -e "${MENU_COLOR}0. 退出${NORMAL}"
-        read -p "请输入选项（0-9/H/D/F/I/W）: " OPTION
+        read -p "请输入选项（0-9/H/O/D/F/I/W）: " OPTION  # 更新提示
 
         case $OPTION in
             1) setup_prerequisites ;;
@@ -1669,11 +1890,19 @@ main_menu() {
                 display_status "Ollama目录权限已修复" "success"
                 read -n 1 -s -r -p "按任意键继续..."
                 ;;
+            [Oo])
+                display_status "正在运行Ollama Docker修复工具..." "info"
+                fix_ollama_docker
+                read -n 1 -s -r -p "按任意键继续..."
+                ;;
             [Dd])
+                display_status "正在运行DNS修复工具..." "info"
                 fix_wsl_dns
+                display_status "DNS修复完成" "success"
                 read -n 1 -s -r -p "按任意键继续..."
                 ;;
             [Ff])
+                display_status "正在运行超级修复工具..." "info"
                 create_superfix_tool
                 display_status "超级修复工具已创建，可以使用 'dria-superfix' 命令启动" "success"
                 read -p "是否立即运行超级修复工具?(y/n): " run_superfix
@@ -1682,6 +1911,7 @@ main_menu() {
                 fi
                 ;;
             [Ii])
+                display_status "正在创建直接IP连接工具..." "info"
                 create_direct_connect_tool
                 display_status "直接IP连接工具已创建，可以使用 'dria-direct' 命令启动" "success"
                 read -p "是否立即运行直接IP连接?(y/n): " run_direct
@@ -1691,7 +1921,10 @@ main_menu() {
                 ;;
             [Ww]) 
                 if [ "$ENV_TYPE" = "wsl" ]; then
-                    configure_wsl_network
+                    display_status "正在运行WSL网络修复工具..." "info"
+                    fix_wsl_network
+                    display_status "WSL网络修复完成" "success"
+                    read -n 1 -s -r -p "按任意键继续..."
                 else
                     display_status "此选项仅适用于WSL环境" "error"
                 fi 
@@ -1708,3 +1941,12 @@ initialize      # 快速初始化
 init_network_check  # 网络检测在后台进行
 display_info
 main_menu
+
+# WSL网络修复功能
+fix_wsl_network() {
+    # 检查是否在WSL环境中
+    if ! grep -qi "microsoft" /proc/version && ! grep -qi "microsoft" /proc/sys/kernel/osrelease; then
+        display_status "此功能仅适用于WSL环境" "error"
+        return 1
+    fi
+}
