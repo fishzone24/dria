@@ -1931,6 +1931,58 @@ init_network_check() {
 # 显示脚本信息
 display_info() {
     clear
+    # 署名信息
+    cat << "EOF"
+
+   __   _         _                                    ___    _  _   
+  / _| (_)       | |                                  |__ \  | || |  
+ | |_   _   ___  | |__    ____   ___    _ __     ___     ) | | || |_ 
+ |  _| | | / __| | '_ \  |_  /  / _ \  | '_ \   / _ \   / /  |__   _|
+ | |   | | \__ \ | | | |  / /  | (_) | | | | | |  __/  / /_     | |  
+ |_|   |_| |___/ |_| |_| /___|  \___/  |_| |_|  \___| |____|    |_|  
+                                                                     
+                                                                     
+
+                                                                                                                                  
+
+EOF
+    echo -e "${BLUE}==================================================================${RESET}"
+    echo -e "${GREEN}Dria 节点一键管理脚本${RESET}"
+    echo -e "${YELLOW}脚本作者: fishzone24 - 推特: https://x.com/fishzone24${RESET}"
+    echo -e "${YELLOW}此脚本为免费开源脚本，如有问题请提交 issue${RESET}"
+    echo -e "${BLUE}==================================================================${RESET}"
+    
+    echo ""
+    echo -e "${GREEN}此脚本将帮助您在 Ubuntu 系统上自动安装和配置 Dria 计算节点。${RESET}"
+    if [ "$ENV_TYPE" = "wsl" ]; then
+        echo -e "${YELLOW}当前在Windows Subsystem for Linux (WSL)环境中运行${RESET}"
+    else
+        echo -e "${YELLOW}当前在原生Ubuntu环境中运行${RESET}"
+    fi
+    echo "安装过程包括:"
+    echo "- 更新系统并安装必要的依赖"
+    echo "- 安装 Docker 环境"
+    echo "- 安装 Ollama（用于本地模型）"
+    echo "- 安装 Dria 计算节点"
+    echo "- 提供节点管理界面"
+    echo ""
+    echo "注意:"
+    echo "1. 请确保您已经以 root 用户身份运行此脚本"
+    echo "2. 安装过程需要稳定的网络连接"
+    echo "3. 请确保您的系统资源足够运行 Dria 节点"
+    echo ""
+    
+    # 只在第一次启动时提示按键继续
+    if [ -z "$SCRIPT_INITIALIZED" ]; then
+        read -n 1 -s -r -p "按任意键继续..."
+        export SCRIPT_INITIALIZED=true
+    fi
+}
+
+# 主菜单功能
+main_menu() {
+    # 不使用while循环
+    clear
     # 添加署名信息
     cat << "EOF"
 
@@ -1951,158 +2003,128 @@ EOF
     echo -e "${YELLOW}脚本作者: fishzone24 - 推特: https://x.com/fishzone24${RESET}"
     echo -e "${YELLOW}此脚本为免费开源脚本，如有问题请提交 issue${RESET}"
     echo -e "${BLUE}==================================================================${RESET}"
-    echo -e ""
-    echo -e "${INFO_COLOR}此脚本将帮助您在 Ubuntu 系统上自动安装和配置 Dria 计算节点。${NORMAL}"
     
-    # 显示当前环境信息
+    # 显示运行环境
     if [ "$ENV_TYPE" = "wsl" ]; then
-        echo -e "${WARNING_COLOR}已检测到Windows Subsystem for Linux (WSL)环境${NORMAL}"
-        echo -e "${WARNING_COLOR}脚本已针对WSL环境进行优化${NORMAL}"
+        display_status "当前运行在Windows Subsystem for Linux (WSL)环境中" "info"
     else
-        echo -e "${INFO_COLOR}当前在原生Ubuntu环境中运行${NORMAL}"
+        display_status "当前运行在原生Ubuntu环境中" "info"
     fi
     
-    # 执行简单的网络检查 - 不阻塞
-    if [ -f /tmp/dria_network_status ] && [ "$(cat /tmp/dria_network_status)" = "internet_error" ]; then
-        echo -e "${ERROR_COLOR}${BOLD}警告: 网络连接可能有问题，这可能会影响安装过程${NORMAL}"
+    # 显示代理状态
+    if [ ! -z "$http_proxy" ]; then
+        display_status "代理已设置: $http_proxy" "info"
     fi
     
+    # 显示网络状态
     if [ -f /tmp/dria_github_status ] && [ "$(cat /tmp/dria_github_status)" = "github_error" ]; then
-        echo -e "${ERROR_COLOR}${BOLD}警告: 无法连接到GitHub，请考虑设置网络代理${NORMAL}"
+        display_status "GitHub连接不可用，建议设置网络代理" "warning"
     fi
     
-    echo -e "${INFO_COLOR}安装过程包括:${NORMAL}"
-    echo -e "${INFO_COLOR}- 更新系统并安装必要的依赖${NORMAL}"
-    echo -e "${INFO_COLOR}- 安装 Docker 环境${NORMAL}"
-    echo -e "${INFO_COLOR}- 安装 Ollama（用于本地模型）${NORMAL}"
-    echo -e "${INFO_COLOR}- 安装 Dria 计算节点${NORMAL}"
-    echo -e "${INFO_COLOR}- 提供节点管理界面${NORMAL}"
-    echo -e ""
-    echo -e "${WARNING_COLOR}${BOLD}注意:${NORMAL}"
-    echo -e "${WARNING_COLOR}1. 请确保您已经以 root 用户身份运行此脚本${NORMAL}"
-    echo -e "${WARNING_COLOR}2. 安装过程需要稳定的网络连接${NORMAL}"
-    echo -e "${WARNING_COLOR}3. 请确保您的系统资源足够运行 Dria 节点${NORMAL}"
-    
-    # WSL特定提示
-    if [ "$ENV_TYPE" = "wsl" ]; then
-        echo -e ""
-        echo -e "${WARNING_COLOR}${BOLD}WSL环境特别提示:${NORMAL}"
-        echo -e "${WARNING_COLOR}1. 确保WSL2集成已启用${NORMAL}"
-        echo -e "${WARNING_COLOR}2. 在WSL中Docker可能需要手动启动${NORMAL}"
-        echo -e "${WARNING_COLOR}3. 如遇到问题，可尝试重启WSL或Windows系统${NORMAL}"
-        echo -e "${WARNING_COLOR}4. 可在Windows PowerShell中执行 wsl --shutdown 后重新启动WSL${NORMAL}"
-        echo -e "${WARNING_COLOR}5. 请先设置网络代理以确保能够访问GitHub${NORMAL}"
-    fi
-    
-    echo -e ""
-    read -n 1 -s -r -p "按任意键继续..."
-}
+    echo -e "${MENU_COLOR}${BOLD}============================ Dria 节点管理工具 ============================${NORMAL}"
+    echo -e "${MENU_COLOR}请选择操作:${NORMAL}"
+    echo -e "${MENU_COLOR}1. 更新系统并安装依赖项${NORMAL}"
+    echo -e "${MENU_COLOR}2. 安装 Docker 环境${NORMAL}"
+    echo -e "${MENU_COLOR}3. 安装 Ollama${NORMAL}"
+    echo -e "${MENU_COLOR}4. 安装 Dria 计算节点${NORMAL}"
+    echo -e "${MENU_COLOR}5. Dria 节点管理${NORMAL}"
+    echo -e "${MENU_COLOR}6. 检查系统环境${NORMAL}"
+    echo -e "${MENU_COLOR}7. 检查网络连接${NORMAL}"
+    echo -e "${MENU_COLOR}8. 设置网络代理${NORMAL}"
+    echo -e "${MENU_COLOR}9. 清除网络代理${NORMAL}"
+    echo -e "${MENU_COLOR}H. Ollama修复工具${NORMAL}"
+    echo -e "${MENU_COLOR}O. Ollama Docker修复${NORMAL}"
+    echo -e "${MENU_COLOR}D. DNS修复工具${NORMAL}"
+    echo -e "${MENU_COLOR}F. 超级修复工具${NORMAL}"
+    echo -e "${MENU_COLOR}I. 直接IP连接${NORMAL}"
+    echo -e "${MENU_COLOR}W. WSL网络修复工具${NORMAL}"
+    echo -e "${MENU_COLOR}0. 退出${NORMAL}"
+    read -p "请输入选项（0-9/H/O/D/F/I/W）: " OPTION
 
-# 主菜单功能
-main_menu() {
-    while true; do
-        clear
-        # 添加署名信息
-        cat << "EOF"
-
-   __   _         _                                    ___    _  _   
-  / _| (_)       | |                                  |__ \  | || |  
- | |_   _   ___  | |__    ____   ___    _ __     ___     ) | | || |_ 
- |  _| | | / __| | '_ \  |_  /  / _ \  | '_ \   / _ \   / /  |__   _|
- | |   | | \__ \ | | | |  / /  | (_) | | | | | |  __/  / /_     | |  
- |_|   |_| |___/ |_| |_| /___|  \___/  |_| |_|  \___| |____|    |_|  
-                                                                     
-                                                                     
-
-                                                                                                                                  
-
-EOF
-        echo -e "${BLUE}==================================================================${RESET}"
-        echo -e "${GREEN}Dria 节点一键管理脚本${RESET}"
-        echo -e "${YELLOW}脚本作者: fishzone24 - 推特: https://x.com/fishzone24${RESET}"
-        echo -e "${YELLOW}此脚本为免费开源脚本，如有问题请提交 issue${RESET}"
-        echo -e "${BLUE}==================================================================${RESET}"
-        
-        # 显示运行环境
-        if [ "$ENV_TYPE" = "wsl" ]; then
-            display_status "当前运行在Windows Subsystem for Linux (WSL)环境中" "info"
-        else
-            display_status "当前运行在原生Ubuntu环境中" "info"
-        fi
-        
-        # 显示代理状态
-        if [ ! -z "$http_proxy" ]; then
-            display_status "代理已设置: $http_proxy" "info"
-        fi
-        
-        # 显示网络状态
-        if [ -f /tmp/dria_github_status ] && [ "$(cat /tmp/dria_github_status)" = "github_error" ]; then
-            display_status "GitHub连接不可用，建议设置网络代理" "warning"
-        fi
-        
-        echo -e "${MENU_COLOR}${BOLD}============================ Dria 节点管理工具 ============================${NORMAL}"
-        echo -e "${MENU_COLOR}请选择操作:${NORMAL}"
-        echo -e "${MENU_COLOR}1. 更新系统并安装依赖项${NORMAL}"
-        echo -e "${MENU_COLOR}2. 安装 Docker 环境${NORMAL}"
-        echo -e "${MENU_COLOR}3. 安装 Ollama${NORMAL}"
-        echo -e "${MENU_COLOR}4. 安装 Dria 计算节点${NORMAL}"
-        echo -e "${MENU_COLOR}5. Dria 节点管理${NORMAL}"
-        echo -e "${MENU_COLOR}6. 检查系统环境${NORMAL}"
-        echo -e "${MENU_COLOR}7. 检查网络连接${NORMAL}"
-        echo -e "${MENU_COLOR}8. 设置网络代理${NORMAL}"
-        echo -e "${MENU_COLOR}9. 清除网络代理${NORMAL}"
-        echo -e "${MENU_COLOR}H. Ollama修复工具${NORMAL}"
-        echo -e "${MENU_COLOR}O. Ollama Docker修复${NORMAL}"
-        echo -e "${MENU_COLOR}D. DNS修复工具${NORMAL}"
-        echo -e "${MENU_COLOR}F. 超级修复工具${NORMAL}"
-        echo -e "${MENU_COLOR}I. 直接IP连接${NORMAL}"
-        echo -e "${MENU_COLOR}W. WSL网络修复工具${NORMAL}"
-        echo -e "${MENU_COLOR}0. 退出${NORMAL}"
-        read -p "请输入选项（0-9/H/O/D/F/I/W）: " OPTION
-
-        case $OPTION in
-            1) setup_prerequisites ;;
-            2) install_docker ;;
-            3) install_ollama ;;
-            4) install_dria_node ;;
-            5) manage_dria_node ;;
-            6) check_system_environment ;;
-            7) check_network ;;
-            8) setup_proxy ;;
-            9) clear_proxy ;;
-            [Hh])
-                display_status "正在修复Ollama..." "info"
-                mkdir -p /root/.ollama/models
-                chown -R root:root /root/.ollama
-                chmod -R 755 /root/.ollama
-                display_status "Ollama目录权限已修复" "success"
-                read -n 1 -s -r -p "按任意键继续..."
-                ;;
-            [Oo])
-                display_status "正在运行Ollama Docker修复工具..." "info"
-                fix_ollama_docker
-                read -n 1 -s -r -p "按任意键继续..."
-                ;;
-            [Dd])
-                display_status "正在运行DNS修复工具..." "info"
-                fix_wsl_dns
-                display_status "DNS修复完成" "success"
-                read -n 1 -s -r -p "按任意键继续..."
-                ;;
-            [Ff])
-                display_status "正在运行超级修复工具..." "info"
-                create_superfix_tool
-                display_status "超级修复工具已创建，可以使用 'dria-superfix' 命令启动" "success"
-                read -p "是否立即运行超级修复工具?(y/n): " run_superfix
-                if [[ $run_superfix == "y" || $run_superfix == "Y" ]]; then
-                    /usr/local/bin/dria-superfix
-                fi
-                ;;
-            [Ii])
-                display_status "创建直接IP连接工具..." "info"
+    case $OPTION in
+        1) 
+            setup_prerequisites
+            read -n 1 -s -r -p "按任意键返回主菜单..."
+            main_menu
+            ;;
+        2) 
+            install_docker
+            read -n 1 -s -r -p "按任意键返回主菜单..."
+            main_menu
+            ;;
+        3) 
+            install_ollama
+            read -n 1 -s -r -p "按任意键返回主菜单..."
+            main_menu
+            ;;
+        4) 
+            install_dria_node
+            read -n 1 -s -r -p "按任意键返回主菜单..."
+            main_menu
+            ;;
+        5) 
+            manage_dria_node
+            read -n 1 -s -r -p "按任意键返回主菜单..."
+            main_menu
+            ;;
+        6) 
+            check_system_environment
+            read -n 1 -s -r -p "按任意键返回主菜单..."
+            main_menu
+            ;;
+        7) 
+            check_network
+            read -n 1 -s -r -p "按任意键返回主菜单..."
+            main_menu
+            ;;
+        8) 
+            setup_proxy
+            read -n 1 -s -r -p "按任意键返回主菜单..."
+            main_menu
+            ;;
+        9) 
+            clear_proxy
+            read -n 1 -s -r -p "按任意键返回主菜单..."
+            main_menu
+            ;;
+        [Hh])
+            display_status "正在修复Ollama..." "info"
+            mkdir -p /root/.ollama/models
+            chown -R root:root /root/.ollama
+            chmod -R 755 /root/.ollama
+            display_status "Ollama目录权限已修复" "success"
+            read -n 1 -s -r -p "按任意键返回主菜单..."
+            main_menu
+            ;;
+        [Oo])
+            display_status "正在运行Ollama Docker修复工具..." "info"
+            fix_ollama_docker
+            read -n 1 -s -r -p "按任意键返回主菜单..."
+            main_menu
+            ;;
+        [Dd])
+            display_status "正在运行DNS修复工具..." "info"
+            fix_wsl_dns
+            display_status "DNS修复完成" "success"
+            read -n 1 -s -r -p "按任意键返回主菜单..."
+            main_menu
+            ;;
+        [Ff])
+            display_status "正在运行超级修复工具..." "info"
+            create_superfix_tool
+            display_status "超级修复工具已创建，可以使用 'dria-superfix' 命令启动" "success"
+            read -p "是否立即运行超级修复工具?(y/n): " run_superfix
+            if [[ $run_superfix == "y" || $run_superfix == "Y" ]]; then
+                /usr/local/bin/dria-superfix
+            fi
+            read -n 1 -s -r -p "按任意键返回主菜单..."
+            main_menu
+            ;;
+        [Ii])
+            display_status "创建直接IP连接工具..." "info"
                 
-                # 创建工具脚本
-                cat > /usr/local/bin/dria-direct << 'EOF'
+            # 创建工具脚本
+            cat > /usr/local/bin/dria-direct << 'EOF'
 #!/bin/bash
 
 # 颜色定义
@@ -2229,27 +2251,31 @@ else
 fi
 EOF
 
-                # 设置执行权限
-                chmod +x /usr/local/bin/dria-direct
-                display_status "直接IP连接工具已创建，可以使用 'dria-direct' 命令启动" "success"
+            # 设置执行权限
+            chmod +x /usr/local/bin/dria-direct
+            display_status "直接IP连接工具已创建，可以使用 'dria-direct' 命令启动" "success"
                 
-                read -p "是否立即运行直接IP连接?(y/n): " run_direct
-                if [[ $run_direct == "y" || $run_direct == "Y" ]]; then
-                    /usr/local/bin/dria-direct
-                fi
-                read -p "按任意键返回主菜单..."
-                ;;
-            [Ww])
-                display_status "正在运行WSL网络修复工具..." "info"
-                fix_wsl_network
-                display_status "WSL网络修复完成" "success"
-                read -n 1 -s -r -p "按任意键继续..."
-                ;;
-            0) exit 0 ;;
-            *) display_status "无效选项，请重试。" "error" ;;
-        esac
-        read -n 1 -s -r -p "按任意键返回主菜单..."
-    done
+            read -p "是否立即运行直接IP连接?(y/n): " run_direct
+            if [[ $run_direct == "y" || $run_direct == "Y" ]]; then
+                /usr/local/bin/dria-direct
+            fi
+            read -n 1 -s -r -p "按任意键返回主菜单..."
+            main_menu
+            ;;
+        [Ww])
+            display_status "正在运行WSL网络修复工具..." "info"
+            fix_wsl_network
+            display_status "WSL网络修复完成" "success"
+            read -n 1 -s -r -p "按任意键返回主菜单..."
+            main_menu
+            ;;
+        0) exit 0 ;;
+        *) 
+            display_status "无效选项，请重试。" "error"
+            read -n 1 -s -r -p "按任意键返回主菜单..."
+            main_menu
+            ;;
+    esac
 }
 
 # 执行脚本
@@ -2257,149 +2283,3 @@ initialize      # 快速初始化
 init_network_check  # 网络检测在后台进行
 display_info
 main_menu
-
-# WSL网络修复功能
-fix_wsl_network() {
-    # 检查是否在WSL环境中
-    if ! grep -qi "microsoft" /proc/version && ! grep -qi "microsoft" /proc/sys/kernel/osrelease; then
-        display_status "此功能仅适用于WSL环境" "error"
-        return 1
-    fi
-}
-
-# 创建直接IP连接工具
-create_direct_connect_tool() {
-    display_status "创建直接IP连接工具..." "info"
-    
-    # 创建工具脚本
-    cat > /usr/local/bin/dria-direct << 'EOF'
-#!/bin/bash
-
-# 颜色定义
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[0;33m'
-BLUE='\033[0;34m'
-NC='\033[0m'
-
-# 显示状态函数
-display_status() {
-    local message="$1"
-    local status="$2"
-    case $status in
-        "error")
-            echo -e "${RED}❌ 错误: ${message}${NC}"
-            ;;
-        "warning")
-            echo -e "${YELLOW}⚠️ 警告: ${message}${NC}"
-            ;;
-        "success")
-            echo -e "${GREEN}✅ 成功: ${message}${NC}"
-            ;;
-        "info")
-            echo -e "${BLUE}ℹ️ 信息: ${message}${NC}"
-            ;;
-        *)
-            echo -e "${message}"
-            ;;
-    esac
-}
-
-# 检查是否以root权限运行
-if [ "$EUID" -ne 0 ]; then 
-    display_status "请使用root权限运行此脚本" "error"
-    exit 1
-fi
-
-# 停止现有服务
-display_status "停止现有服务..." "info"
-systemctl stop dria-node 2>/dev/null || true
-docker-compose -f /root/.dria/docker-compose.yml down 2>/dev/null || true
-
-# 获取本机IP
-LOCAL_IP=$(hostname -I | awk '{print $1}')
-if [ -z "$LOCAL_IP" ]; then
-    LOCAL_IP="0.0.0.0"
-fi
-
-# 创建优化的网络配置
-display_status "创建优化的网络配置..." "info"
-mkdir -p /root/.dria
-cat > /root/.dria/settings.json << EOL
-{
-    "network": {
-        "connection_timeout": 300,
-        "direct_connection_timeout": 20000,
-        "relay_connection_timeout": 60000,
-        "bootstrap_nodes": [
-            "/ip4/34.145.16.76/tcp/4001/p2p/QmXZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
-            "/ip4/34.42.109.93/tcp/4001/p2p/QmYZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
-            "/ip4/34.42.43.172/tcp/4001/p2p/QmZZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
-            "/ip4/35.200.247.78/tcp/4001/p2p/QmWZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
-            "/ip4/34.92.171.75/tcp/4001/p2p/QmVZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV"
-        ],
-        "listen_addresses": [
-            "/ip4/0.0.0.0/tcp/4001",
-            "/ip4/0.0.0.0/udp/4001/quic-v1"
-        ],
-        "external_addresses": [
-            "/ip4/$LOCAL_IP/tcp/4001",
-            "/ip4/$LOCAL_IP/udp/4001/quic-v1"
-        ]
-    }
-}
-EOL
-
-# 创建docker-compose.yml文件
-display_status "创建docker-compose.yml文件..." "info"
-cat > /root/.dria/docker-compose.yml << 'EOL'
-version: '3.8'
-
-services:
-  dria-node:
-    image: dria/dkn-compute-launcher:latest
-    container_name: dria-node
-    restart: unless-stopped
-    network_mode: host
-    volumes:
-      - /root/.dria:/root/.dria
-    environment:
-      - DKN_LOG=debug
-    ports:
-      - "4001:4001"
-      - "1337:1337"
-      - "11434:11434"
-    command: start
-
-networks:
-  default:
-    name: dria-network
-    driver: bridge
-EOL
-
-# 确保文件权限正确
-chmod 644 /root/.dria/docker-compose.yml
-chown root:root /root/.dria/docker-compose.yml
-
-# 检查Docker网络
-display_status "检查Docker网络..." "info"
-if ! docker network inspect dria-network >/dev/null 2>&1; then
-    docker network create dria-network
-fi
-
-# 尝试启动节点
-display_status "尝试启动节点..." "info"
-if docker-compose -f /root/.dria/docker-compose.yml up -d; then
-    display_status "节点启动成功" "success"
-    echo "请检查节点状态："
-    docker-compose -f /root/.dria/docker-compose.yml logs -f
-else
-    display_status "节点启动失败" "error"
-    exit 1
-fi
-EOF
-
-# 设置执行权限
-chmod +x /usr/local/bin/dria-direct
-display_status "直接IP连接工具已创建" "success"
-}
