@@ -2134,3 +2134,140 @@ fix_wsl_network() {
         return 1
     fi
 }
+
+# 创建直接IP连接工具
+create_direct_connect_tool() {
+    display_status "创建直接IP连接工具..." "info"
+    
+    # 创建工具脚本
+    cat > /usr/local/bin/dria-direct << 'EOF'
+#!/bin/bash
+
+# 颜色定义
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+# 显示状态函数
+display_status() {
+    local message="$1"
+    local status="$2"
+    case $status in
+        "error")
+            echo -e "${RED}❌ 错误: ${message}${NC}"
+            ;;
+        "warning")
+            echo -e "${YELLOW}⚠️ 警告: ${message}${NC}"
+            ;;
+        "success")
+            echo -e "${GREEN}✅ 成功: ${message}${NC}"
+            ;;
+        "info")
+            echo -e "${BLUE}ℹ️ 信息: ${message}${NC}"
+            ;;
+        *)
+            echo -e "${message}"
+            ;;
+    esac
+}
+
+# 检查是否以root权限运行
+if [ "$EUID" -ne 0 ]; then 
+    display_status "请使用root权限运行此脚本" "error"
+    exit 1
+fi
+
+# 停止现有服务
+display_status "停止现有服务..." "info"
+systemctl stop dria-node 2>/dev/null || true
+docker-compose -f /root/.dria/docker-compose.yml down 2>/dev/null || true
+
+# 获取本机IP
+LOCAL_IP=$(hostname -I | awk '{print $1}')
+if [ -z "$LOCAL_IP" ]; then
+    LOCAL_IP="0.0.0.0"
+fi
+
+# 创建优化的网络配置
+display_status "创建优化的网络配置..." "info"
+mkdir -p /root/.dria
+cat > /root/.dria/settings.json << EOL
+{
+    "network": {
+        "connection_timeout": 300,
+        "direct_connection_timeout": 20000,
+        "relay_connection_timeout": 60000,
+        "bootstrap_nodes": [
+            "/ip4/34.145.16.76/tcp/4001/p2p/QmXZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
+            "/ip4/34.42.109.93/tcp/4001/p2p/QmYZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
+            "/ip4/34.42.43.172/tcp/4001/p2p/QmZZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
+            "/ip4/35.200.247.78/tcp/4001/p2p/QmWZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
+            "/ip4/34.92.171.75/tcp/4001/p2p/QmVZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV"
+        ],
+        "listen_addresses": [
+            "/ip4/0.0.0.0/tcp/4001",
+            "/ip4/0.0.0.0/udp/4001/quic-v1"
+        ],
+        "external_addresses": [
+            "/ip4/$LOCAL_IP/tcp/4001",
+            "/ip4/$LOCAL_IP/udp/4001/quic-v1"
+        ]
+    }
+}
+EOL
+
+# 创建docker-compose.yml文件
+display_status "创建docker-compose.yml文件..." "info"
+cat > /root/.dria/docker-compose.yml << 'EOL'
+version: '3.8'
+
+services:
+  dria-node:
+    image: dria/dkn-compute-launcher:latest
+    container_name: dria-node
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - /root/.dria:/root/.dria
+    environment:
+      - DKN_LOG=debug
+    ports:
+      - "4001:4001"
+      - "1337:1337"
+      - "11434:11434"
+    command: start
+
+networks:
+  default:
+    name: dria-network
+    driver: bridge
+EOL
+
+# 确保文件权限正确
+chmod 644 /root/.dria/docker-compose.yml
+chown root:root /root/.dria/docker-compose.yml
+
+# 检查Docker网络
+display_status "检查Docker网络..." "info"
+if ! docker network inspect dria-network >/dev/null 2>&1; then
+    docker network create dria-network
+fi
+
+# 尝试启动节点
+display_status "尝试启动节点..." "info"
+if docker-compose -f /root/.dria/docker-compose.yml up -d; then
+    display_status "节点启动成功" "success"
+    echo "请检查节点状态："
+    docker-compose -f /root/.dria/docker-compose.yml logs -f
+else
+    display_status "节点启动失败" "error"
+    exit 1
+fi
+EOF
+
+# 设置执行权限
+chmod +x /usr/local/bin/dria-direct
+display_status "直接IP连接工具已创建" "success"
+}
