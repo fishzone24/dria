@@ -1357,8 +1357,23 @@ manage_dria_node() {
         4) 
             # 检查是否已经配置了基本设置
             ENV_FILE="/root/.dria/dkn-compute-launcher/.env"
-            if [ ! -f "$ENV_FILE" ] || ! grep -q "WALLET_SECRET_KEY" "$ENV_FILE" || ! grep -q "MODELS" "$ENV_FILE"; then
+            if [ ! -f "$ENV_FILE" ]; then
+                display_status "配置文件不存在，请先进行配置" "warning"
+                dkn-compute-launcher settings
+                return
+            fi
+            
+            # 检查配置文件内容
+            if ! grep -q "WALLET_SECRET_KEY=" "$ENV_FILE" || ! grep -q "MODELS=" "$ENV_FILE"; then
                 display_status "检测到未完成基本配置，请先进行配置" "warning"
+                dkn-compute-launcher settings
+                return
+            fi
+            
+            # 检查钱包配置是否为空
+            WALLET_KEY=$(grep "WALLET_SECRET_KEY=" "$ENV_FILE" | cut -d'=' -f2)
+            if [ -z "$WALLET_KEY" ] || [ "$WALLET_KEY" = '""' ]; then
+                display_status "检测到钱包配置为空，请先配置钱包" "warning"
                 dkn-compute-launcher settings
                 return
             fi
