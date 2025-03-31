@@ -1,1 +1,0 @@
-curl -fsSL https://raw.githubusercontent.com/fishzone24/dria/main/dria_auto_install.sh -o dria_auto_install.sh && chmod +x dria_auto_install.sh && sudo ./dria_auto_install.sh 
