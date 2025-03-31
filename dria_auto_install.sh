@@ -1356,7 +1356,7 @@ manage_dria_node() {
         3) dkn-compute-launcher points ;;
         4) 
             # 检查是否已经配置了基本设置
-            if ! dkn-compute-launcher settings get model &>/dev/null; then
+            if ! grep -q "model=" /root/.dria/dkn-compute-launcher/.env 2>/dev/null; then
                 display_status "检测到未配置基本设置，请先进行配置" "warning"
                 # 直接进入设置界面
                 dkn-compute-launcher settings
