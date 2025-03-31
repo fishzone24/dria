@@ -1356,24 +1356,12 @@ manage_dria_node() {
         3) dkn-compute-launcher points ;;
         4) 
             # 检查是否已经配置了基本设置
-            CONFIG_CHECK=$(mktemp)
-            # 检查钱包配置
-            if ! dkn-compute-launcher settings get wallet &> "$CONFIG_CHECK" || ! grep -q "[a-zA-Z0-9]" "$CONFIG_CHECK"; then
-                rm -f "$CONFIG_CHECK"
-                display_status "检测到未配置钱包，请先进行配置" "warning"
+            ENV_FILE="/root/.dria/dkn-compute-launcher/.env"
+            if [ ! -f "$ENV_FILE" ] || ! grep -q "WALLET_SECRET_KEY" "$ENV_FILE" || ! grep -q "MODELS" "$ENV_FILE"; then
+                display_status "检测到未完成基本配置，请先进行配置" "warning"
                 dkn-compute-launcher settings
                 return
             fi
-            
-            # 检查模型配置
-            if ! dkn-compute-launcher settings get models &> "$CONFIG_CHECK" || ! grep -q "llama\|mistral\|codellama" "$CONFIG_CHECK"; then
-                rm -f "$CONFIG_CHECK"
-                display_status "检测到未配置模型，请先进行配置" "warning"
-                dkn-compute-launcher settings
-                return
-            fi
-            
-            rm -f "$CONFIG_CHECK"
             
             # 如果已经配置了基本设置，则继续处理推荐码
             display_status "正在配置推荐码管理环境..." "info"
