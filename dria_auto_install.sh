@@ -554,7 +554,7 @@ EOF
     # 检查Docker网络
     if command -v docker &> /dev/null; then
         display_status "正在检查Docker网络配置..." "info"
-        docker network prune -f
+docker network prune -f
         docker system prune -f
     fi
     
@@ -563,138 +563,98 @@ EOF
 
 # 检查并配置防火墙
 check_and_configure_firewall() {
-    display_status "检查防火墙配置..." "info"
+    display_status "检查并配置防火墙..." "info"
     
-    # 检查端口是否被占用
-    check_port() {
-        local port=$1
-        local protocol=$2
-        if netstat -tuln | grep -q ":$port "; then
-            echo "端口 $port ($protocol) 已被占用"
-            return 1
+    # 检查ufw状态
+    if command -v ufw &>/dev/null; then
+        if ufw status | grep -q "Status: active"; then
+            display_status "检测到UFW防火墙已启用，正在添加必要规则..." "info"
+            ufw allow 4001/tcp >/dev/null || display_status "添加UFW规则4001/tcp失败" "warning"
+            ufw allow 4001/udp >/dev/null || display_status "添加UFW规则4001/udp失败" "warning"
+            ufw allow 1337/tcp >/dev/null || display_status "添加UFW规则1337/tcp失败" "warning"
+            ufw allow 11434/tcp >/dev/null || display_status "添加UFW规则11434/tcp失败" "warning"
+            display_status "UFW防火墙规则已添加" "success"
+        else
+            display_status "UFW未启用，正在启用并添加规则..." "warning"
+            ufw --force enable >/dev/null
+            ufw allow ssh >/dev/null
+            ufw allow 4001/tcp >/dev/null
+            ufw allow 4001/udp >/dev/null
+            ufw allow 1337/tcp >/dev/null
+            ufw allow 11434/tcp >/dev/null
+            display_status "UFW防火墙已启用并配置规则" "success"
         fi
-        return 0
-    }
-    
-    # 安装必要的工具
-    if ! command -v netstat &> /dev/null; then
-        display_status "安装网络工具..." "info"
-        apt-get update
-        apt-get install -y net-tools
+    else
+        # 如果没有ufw，尝试使用iptables
+        if command -v iptables &>/dev/null; then
+            display_status "UFW未安装，使用iptables配置防火墙规则..." "warning"
+            # 添加iptables规则
+            iptables -A INPUT -p tcp --dport 4001 -j ACCEPT 2>/dev/null || display_status "添加iptables规则4001/tcp失败" "warning"
+            iptables -A INPUT -p udp --dport 4001 -j ACCEPT 2>/dev/null || display_status "添加iptables规则4001/udp失败" "warning"
+            iptables -A INPUT -p tcp --dport 1337 -j ACCEPT 2>/dev/null || display_status "添加iptables规则1337/tcp失败" "warning"
+            iptables -A INPUT -p tcp --dport 11434 -j ACCEPT 2>/dev/null || display_status "添加iptables规则11434/tcp失败" "warning"
+            display_status "iptables规则已添加" "success"
+            
+            # 尝试保存iptables规则
+            if command -v iptables-save &>/dev/null; then
+                if [ -d "/etc/iptables" ]; then
+                    iptables-save > /etc/iptables/rules.v4 2>/dev/null || display_status "无法保存iptables规则" "warning"
+                elif [ -f "/etc/network/iptables.rules" ]; then
+                    iptables-save > /etc/network/iptables.rules 2>/dev/null || display_status "无法保存iptables规则" "warning"
+                else
+                    display_status "无法确定iptables规则保存位置，重启后可能需要重新配置" "warning"
+                fi
+            fi
+        else
+            display_status "系统未安装防火墙工具(ufw/iptables)，跳过防火墙配置" "warning"
+            display_status "请确保端口4001、1337和11434已在系统防火墙中开放" "warning"
+        fi
     fi
     
-    # 检查并安装UFW
-    if ! command -v ufw &> /dev/null; then
-        display_status "安装UFW防火墙..." "info"
-        apt-get update
-        apt-get install -y ufw
-    fi
-    
-    # 检查并安装iptables
-    if ! command -v iptables &> /dev/null; then
-        display_status "安装iptables..." "info"
-        apt-get update
-        apt-get install -y iptables
-    fi
-    
-    # 检查端口占用情况
-    display_status "检查端口占用情况..." "info"
-    for port in 4001 1337 11434; do
-        if ! check_port $port "TCP"; then
-            display_status "端口 $port 已被占用，正在尝试释放..." "warning"
-            # 查找占用端口的进程
-            pid=$(lsof -i :$port -t)
-            if [ ! -z "$pid" ]; then
-                echo "正在停止占用端口 $port 的进程 (PID: $pid)"
-                kill -9 $pid
-                sleep 2
+    # WSL环境不需要检查端口，因为使用的是Windows防火墙，已经在PowerShell脚本中处理
+    if [ "$ENV_TYPE" != "wsl" ]; then
+        # 检查端口是否可访问
+        display_status "测试端口可访问性..." "info"
+        
+        # 安装netcat如果不存在
+        if ! command -v nc &>/dev/null; then
+            display_status "安装netcat以测试端口..." "info"
+            apt-get update -y >/dev/null 2>&1
+            apt-get install -y netcat-openbsd >/dev/null 2>&1 || 
+            apt-get install -y netcat >/dev/null 2>&1 || 
+            display_status "无法安装netcat，跳过端口测试" "warning"
+        fi
+        
+        if command -v nc &>/dev/null; then
+            # 获取本机IP
+            LOCAL_IP=$(hostname -I | awk '{print $1}')
+            if [ -z "$LOCAL_IP" ]; then
+                LOCAL_IP="127.0.0.1"
+            fi
+            
+            # 测试端口
+            if nc -z -v -w2 $LOCAL_IP 4001 >/dev/null 2>&1; then
+                display_status "端口4001可访问" "success"
+            else
+                display_status "端口4001不可访问，请检查防火墙配置" "warning"
+            fi
+            
+            if nc -z -v -w2 $LOCAL_IP 1337 >/dev/null 2>&1; then
+                display_status "端口1337可访问" "success"
+            else
+                display_status "端口1337不可访问，请检查防火墙配置" "warning"
+            fi
+            
+            if nc -z -v -w2 $LOCAL_IP 11434 >/dev/null 2>&1; then
+                display_status "端口11434可访问" "success"
+            else
+                display_status "端口11434不可访问，请检查防火墙配置" "warning"
             fi
         fi
-    done
-    
-    # 配置UFW
-    display_status "配置UFW防火墙..." "info"
-    if command -v ufw &> /dev/null; then
-        # 如果UFW未启用，先启用它
-        if ! ufw status | grep -q "Status: active"; then
-            echo "y" | ufw enable
-        fi
-        
-        # 添加必要的端口规则
-        ufw allow 4001/tcp
-        ufw allow 4001/udp
-        ufw allow 1337/tcp
-        ufw allow 11434/tcp
-        
-        # 重新加载防火墙规则
-        ufw reload
-    fi
-    
-    # 配置iptables
-    display_status "配置iptables..." "info"
-    if command -v iptables &> /dev/null; then
-        # 添加必要的端口规则
-        iptables -A INPUT -p tcp --dport 4001 -j ACCEPT
-        iptables -A INPUT -p udp --dport 4001 -j ACCEPT
-        iptables -A INPUT -p tcp --dport 1337 -j ACCEPT
-        iptables -A INPUT -p tcp --dport 11434 -j ACCEPT
-        
-        # 保存iptables规则
-        if command -v iptables-save &> /dev/null; then
-            iptables-save > /etc/iptables.rules
-        fi
-    fi
-    
-    # 检查云服务商防火墙
-    display_status "检查云服务商防火墙配置..." "info"
-    echo "请确保在云服务商控制面板中开放以下端口："
-    echo "- TCP 4001"
-    echo "- UDP 4001"
-    echo "- TCP 1337"
-    echo "- TCP 11434"
-    
-    # 测试端口是否可访问
-    display_status "测试端口可访问性..." "info"
-    if ! command -v nc &> /dev/null; then
-        display_status "安装netcat进行端口测试..." "info"
-        apt-get update
-        apt-get install -y netcat
-    fi
-    
-    # 测试TCP端口
-    for port in 4001 1337 11434; do
-        echo "测试TCP端口 $port..."
-        if nc -zv localhost $port 2>&1 | grep -q "succeeded"; then
-            display_status "TCP端口 $port 开放成功" "success"
-        else
-            display_status "TCP端口 $port 可能未开放" "warning"
-        fi
-    done
-    
-    # 测试UDP端口
-    echo "测试UDP端口 4001..."
-    if nc -zuv localhost 4001 2>&1 | grep -q "succeeded"; then
-        display_status "UDP端口 4001 开放成功" "success"
-    else
-        display_status "UDP端口 4001 可能未开放" "warning"
-    fi
-    
-    # 显示当前端口状态
-    display_status "当前端口状态:" "info"
-    netstat -tulpn | grep -E '4001|1337|11434'
-    
-    # 显示防火墙状态
-    if command -v ufw &> /dev/null; then
-        display_status "UFW防火墙状态:" "info"
-        ufw status
-    fi
-    
-    if command -v iptables &> /dev/null; then
-        display_status "iptables规则:" "info"
-        iptables -L -n | grep -E '4001|1337|11434'
     fi
     
     display_status "防火墙配置完成" "success"
+    display_status "如果您使用云服务，请在控制面板中确保这些端口已开放" "warning"
 }
 
 # 创建超级修复工具
@@ -817,10 +777,10 @@ EOL
     # 检查防火墙
     if command -v ufw &> /dev/null; then
         echo "配置防火墙规则..."
-        ufw allow 4001/tcp
-        ufw allow 4001/udp
-        ufw allow 1337/tcp
-        ufw allow 11434/tcp
+    ufw allow 4001/tcp
+    ufw allow 4001/udp
+    ufw allow 1337/tcp
+    ufw allow 11434/tcp
     fi
     
     # 启动节点
@@ -842,7 +802,6 @@ fix_wsl_network() {
     # 停止现有服务
     display_status "停止现有服务..." "info"
     systemctl stop dria-node 2>/dev/null || true
-    docker-compose -f /root/.dria/docker-compose.yml down 2>/dev/null || true
     pkill -f dkn-compute-launcher || true
     
     # 获取Windows主机IP
@@ -872,6 +831,9 @@ EOF
 34.92.171.75 node5.dria.co
 EOF
     fi
+    
+    # 检查和配置防火墙
+    check_and_configure_firewall
     
     # 检查dkn-compute-launcher是否存在
     if ! command -v dkn-compute-launcher &> /dev/null; then
@@ -925,15 +887,15 @@ EOF
             "/ip4/35.200.247.78/tcp/4001/p2p/QmWZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
             "/ip4/34.92.171.75/tcp/4001/p2p/QmVZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV"
         ],
-        "listen_addresses": [
-            "/ip4/0.0.0.0/tcp/4001",
-            "/ip4/0.0.0.0/udp/4001/quic-v1"
-        ],
+    "listen_addresses": [
+      "/ip4/0.0.0.0/tcp/4001",
+      "/ip4/0.0.0.0/udp/4001/quic-v1"
+    ],
         "external_addresses": [
             "/ip4/$WINDOWS_HOST_IP/tcp/4001",
             "/ip4/$WINDOWS_HOST_IP/udp/4001/quic-v1"
-        ]
-    }
+    ]
+  }
 }
 EOF
     
@@ -1087,10 +1049,10 @@ cat > /root/.dria/settings.json << EOF
             "/ip4/35.200.247.78/tcp/4001/p2p/QmWZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
             "/ip4/34.92.171.75/tcp/4001/p2p/QmVZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV"
         ],
-        "listen_addresses": [
-            "/ip4/0.0.0.0/tcp/4001",
-            "/ip4/0.0.0.0/udp/4001/quic-v1"
-        ],
+    "listen_addresses": [
+      "/ip4/0.0.0.0/tcp/4001",
+      "/ip4/0.0.0.0/udp/4001/quic-v1"
+    ],
         "external_addresses": [
             "/ip4/$WINDOWS_HOST_IP/tcp/4001",
             "/ip4/$WINDOWS_HOST_IP/udp/4001/quic-v1"
@@ -1150,7 +1112,7 @@ EOF
     read -p "是否立即启动节点? (y/n): " START_NODE
     if [[ $START_NODE == "y" || $START_NODE == "Y" ]]; then
         display_status "启动Dria节点..." "info"
-        systemctl start dria-node
+systemctl start dria-node
         display_status "已启动Dria节点，您可以使用'journalctl -u dria-node -f'查看日志" "success"
     else
         display_status "您可以稍后使用'systemctl start dria-node'启动节点" "info"
@@ -1777,7 +1739,7 @@ EOF
     
     # 只在第一次启动时提示按键继续
     if [ -z "$SCRIPT_INITIALIZED" ]; then
-        read -n 1 -s -r -p "按任意键继续..."
+    read -n 1 -s -r -p "按任意键继续..."
         export SCRIPT_INITIALIZED=true
     fi
 }
@@ -1785,7 +1747,7 @@ EOF
 # 主菜单功能
 main_menu() {
     # 不使用while循环
-    clear
+        clear
     # 添加署名信息
     cat << "EOF"
 
@@ -1807,44 +1769,44 @@ EOF
     echo -e "${YELLOW}此脚本为免费开源脚本，如有问题请提交 issue${RESET}"
     echo -e "${BLUE}==================================================================${RESET}"
     
-    # 显示运行环境
-    if [ "$ENV_TYPE" = "wsl" ]; then
-        display_status "当前运行在Windows Subsystem for Linux (WSL)环境中" "info"
-    else
-        display_status "当前运行在原生Ubuntu环境中" "info"
-    fi
-    
-    # 显示代理状态
-    if [ ! -z "$http_proxy" ]; then
-        display_status "代理已设置: $http_proxy" "info"
-    fi
-    
-    # 显示网络状态
-    if [ -f /tmp/dria_github_status ] && [ "$(cat /tmp/dria_github_status)" = "github_error" ]; then
-        display_status "GitHub连接不可用，建议设置网络代理" "warning"
-    fi
-    
-    echo -e "${MENU_COLOR}${BOLD}============================ Dria 节点管理工具 ============================${NORMAL}"
-    echo -e "${MENU_COLOR}请选择操作:${NORMAL}"
-    echo -e "${MENU_COLOR}1. 更新系统并安装依赖项${NORMAL}"
-    echo -e "${MENU_COLOR}2. 安装 Docker 环境${NORMAL}"
-    echo -e "${MENU_COLOR}3. 安装 Ollama${NORMAL}"
-    echo -e "${MENU_COLOR}4. 安装 Dria 计算节点${NORMAL}"
-    echo -e "${MENU_COLOR}5. Dria 节点管理${NORMAL}"
-    echo -e "${MENU_COLOR}6. 检查系统环境${NORMAL}"
-    echo -e "${MENU_COLOR}7. 检查网络连接${NORMAL}"
-    echo -e "${MENU_COLOR}8. 设置网络代理${NORMAL}"
-    echo -e "${MENU_COLOR}9. 清除网络代理${NORMAL}"
+        # 显示运行环境
+        if [ "$ENV_TYPE" = "wsl" ]; then
+            display_status "当前运行在Windows Subsystem for Linux (WSL)环境中" "info"
+        else
+            display_status "当前运行在原生Ubuntu环境中" "info"
+        fi
+        
+        # 显示代理状态
+        if [ ! -z "$http_proxy" ]; then
+            display_status "代理已设置: $http_proxy" "info"
+        fi
+        
+        # 显示网络状态
+        if [ -f /tmp/dria_github_status ] && [ "$(cat /tmp/dria_github_status)" = "github_error" ]; then
+            display_status "GitHub连接不可用，建议设置网络代理" "warning"
+        fi
+        
+        echo -e "${MENU_COLOR}${BOLD}============================ Dria 节点管理工具 ============================${NORMAL}"
+        echo -e "${MENU_COLOR}请选择操作:${NORMAL}"
+        echo -e "${MENU_COLOR}1. 更新系统并安装依赖项${NORMAL}"
+        echo -e "${MENU_COLOR}2. 安装 Docker 环境${NORMAL}"
+        echo -e "${MENU_COLOR}3. 安装 Ollama${NORMAL}"
+        echo -e "${MENU_COLOR}4. 安装 Dria 计算节点${NORMAL}"
+        echo -e "${MENU_COLOR}5. Dria 节点管理${NORMAL}"
+        echo -e "${MENU_COLOR}6. 检查系统环境${NORMAL}"
+        echo -e "${MENU_COLOR}7. 检查网络连接${NORMAL}"
+        echo -e "${MENU_COLOR}8. 设置网络代理${NORMAL}"
+        echo -e "${MENU_COLOR}9. 清除网络代理${NORMAL}"
     echo -e "${MENU_COLOR}H. Ollama修复工具${NORMAL}"
     echo -e "${MENU_COLOR}O. Ollama Docker修复${NORMAL}"
-    echo -e "${MENU_COLOR}D. DNS修复工具${NORMAL}"
-    echo -e "${MENU_COLOR}F. 超级修复工具${NORMAL}"
+            echo -e "${MENU_COLOR}D. DNS修复工具${NORMAL}"
+            echo -e "${MENU_COLOR}F. 超级修复工具${NORMAL}"
     echo -e "${MENU_COLOR}I. 直接IP连接${NORMAL}"
     echo -e "${MENU_COLOR}W. WSL网络修复工具${NORMAL}"
-    echo -e "${MENU_COLOR}0. 退出${NORMAL}"
+        echo -e "${MENU_COLOR}0. 退出${NORMAL}"
     read -p "请输入选项（0-9/H/O/D/F/I/W）: " OPTION
 
-    case $OPTION in
+        case $OPTION in
         1) 
             setup_prerequisites
             read -n 1 -s -r -p "按任意键返回主菜单..."
@@ -1904,22 +1866,22 @@ EOF
             fix_ollama_docker
             read -n 1 -s -r -p "按任意键返回主菜单..."
             main_menu
-            ;;
-        [Dd])
+                ;;
+            [Dd])
             display_status "正在运行DNS修复工具..." "info"
-            fix_wsl_dns
+                    fix_wsl_dns
             display_status "DNS修复完成" "success"
             read -n 1 -s -r -p "按任意键返回主菜单..."
             main_menu
-            ;;
-        [Ff])
+                ;;
+            [Ff])
             display_status "正在运行超级修复工具..." "info"
             create_superfix_tool
-            display_status "超级修复工具已创建，可以使用 'dria-superfix' 命令启动" "success"
-            read -p "是否立即运行超级修复工具?(y/n): " run_superfix
-            if [[ $run_superfix == "y" || $run_superfix == "Y" ]]; then
-                /usr/local/bin/dria-superfix
-            fi
+                    display_status "超级修复工具已创建，可以使用 'dria-superfix' 命令启动" "success"
+                    read -p "是否立即运行超级修复工具?(y/n): " run_superfix
+                    if [[ $run_superfix == "y" || $run_superfix == "Y" ]]; then
+                        /usr/local/bin/dria-superfix
+                    fi
             read -n 1 -s -r -p "按任意键返回主菜单..."
             main_menu
             ;;
@@ -2130,11 +2092,11 @@ EOF
             display_status "WSL网络修复完成" "success"
             read -n 1 -s -r -p "按任意键返回主菜单..."
             main_menu
-            ;;
-        0) exit 0 ;;
+                ;;
+            0) exit 0 ;;
         *) 
             display_status "无效选项，请重试。" "error"
-            read -n 1 -s -r -p "按任意键返回主菜单..."
+        read -n 1 -s -r -p "按任意键返回主菜单..."
             main_menu
             ;;
     esac
