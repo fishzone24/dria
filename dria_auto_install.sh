@@ -574,6 +574,10 @@ check_and_configure_firewall() {
             ufw allow 1337/tcp >/dev/null || display_status "添加UFW规则1337/tcp失败" "warning"
             ufw allow 11434/tcp >/dev/null || display_status "添加UFW规则11434/tcp失败" "warning"
             display_status "UFW防火墙规则已添加" "success"
+            
+            # 显示添加的防火墙规则
+            echo "✅ 已配置以下UFW防火墙规则:"
+            ufw status | grep -E "4001|1337|11434"
         else
             display_status "UFW未启用，正在启用并添加规则..." "warning"
             ufw --force enable >/dev/null
@@ -583,6 +587,10 @@ check_and_configure_firewall() {
             ufw allow 1337/tcp >/dev/null
             ufw allow 11434/tcp >/dev/null
             display_status "UFW防火墙已启用并配置规则" "success"
+            
+            # 显示添加的防火墙规则
+            echo "✅ 已配置以下UFW防火墙规则:"
+            ufw status | grep -E "4001|1337|11434"
         fi
     else
         # 如果没有ufw，尝试使用iptables
@@ -594,6 +602,10 @@ check_and_configure_firewall() {
             iptables -A INPUT -p tcp --dport 1337 -j ACCEPT 2>/dev/null || display_status "添加iptables规则1337/tcp失败" "warning"
             iptables -A INPUT -p tcp --dport 11434 -j ACCEPT 2>/dev/null || display_status "添加iptables规则11434/tcp失败" "warning"
             display_status "iptables规则已添加" "success"
+            
+            # 显示添加的iptables规则
+            echo "✅ 已配置以下iptables规则:"
+            iptables -L -n | grep -E "4001|1337|11434"
             
             # 尝试保存iptables规则
             if command -v iptables-save &>/dev/null; then
@@ -632,6 +644,8 @@ check_and_configure_firewall() {
                 LOCAL_IP="127.0.0.1"
             fi
             
+            echo "🔍 检查本地端口状态(IP: $LOCAL_IP):"
+            
             # 测试端口
             if nc -z -v -w2 $LOCAL_IP 4001 >/dev/null 2>&1; then
                 display_status "端口4001可访问" "success"
@@ -651,6 +665,8 @@ check_and_configure_firewall() {
                 display_status "端口11434不可访问，请检查防火墙配置" "warning"
             fi
         fi
+    else
+        echo "🔍 WSL环境检测: 跳过本地端口测试，使用Windows防火墙"
     fi
     
     display_status "防火墙配置完成" "success"
@@ -685,16 +701,21 @@ create_superfix_tool() {
     fi
     
     # 修复DNS
-    echo "修复DNS配置..." "info"
+    display_status "修复DNS配置..." "info"
     if [ "$ENV_TYPE" = "wsl" ]; then
         # WSL环境使用Windows主机作为DNS
         WIN_HOST_IP=$(ip route | grep default | awk '{print $3}')
         if [ ! -z "$WIN_HOST_IP" ]; then
             echo "nameserver $WIN_HOST_IP" > /etc/resolv.conf
+            echo "✅ 添加Windows主机IP作为DNS服务器: $WIN_HOST_IP"
         fi
     fi
     echo "nameserver 8.8.8.8" >> /etc/resolv.conf
     echo "nameserver 1.1.1.1" >> /etc/resolv.conf
+    echo "✅ DNS配置已更新:"
+    echo "   - 添加Google DNS服务器 (8.8.8.8)"
+    echo "   - 添加Cloudflare DNS服务器 (1.1.1.1)"
+    cat /etc/resolv.conf
     
     # 添加hosts映射
     if ! grep -q "node1.dria.co" /etc/hosts; then
@@ -707,10 +728,18 @@ create_superfix_tool() {
 35.200.247.78 node4.dria.co
 34.92.171.75 node5.dria.co
 HOSTS
+        echo "✅ Hosts映射已添加:"
+        echo "   - node1.dria.co -> 34.145.16.76"
+        echo "   - node2.dria.co -> 34.42.109.93"
+        echo "   - node3.dria.co -> 34.42.43.172"
+        echo "   - node4.dria.co -> 35.200.247.78"
+        echo "   - node5.dria.co -> 34.92.171.75"
+    else
+        echo "✅ Hosts映射已存在，无需修改"
     fi
     
     # 创建优化的网络配置
-    echo "创建优化的网络配置..."
+    display_status "创建优化的网络配置..." "info"
     mkdir -p /root/.dria
     
     # 获取本机IP
@@ -718,6 +747,14 @@ HOSTS
     if [ -z "$LOCAL_IP" ]; then
         LOCAL_IP="0.0.0.0"
     fi
+    
+    echo "✅ 网络配置详情:"
+    echo "   - 使用本机IP: $LOCAL_IP"
+    echo "   - 连接超时设置: 300秒"
+    echo "   - 直接连接超时: 20000毫秒"
+    echo "   - 中继连接超时: 60000毫秒" 
+    echo "   - 引导节点: 5个官方节点"
+    echo "   - 监听地址: 0.0.0.0:4001 (TCP/UDP)"
     
     # 根据环境创建不同的网络配置
     if [ "$ENV_TYPE" = "wsl" ]; then
@@ -746,6 +783,7 @@ HOSTS
     }
 }
 WSLSETTINGSEOF
+        echo "✅ WSL环境配置文件已保存至: /root/.dria/settings.json"
     else
         # 原生Linux环境配置
         cat > /root/.dria/settings.json << LINUXSETTINGSEOF
@@ -772,19 +810,28 @@ WSLSETTINGSEOF
     }
 }
 LINUXSETTINGSEOF
+        echo "✅ Linux环境配置文件已保存至: /root/.dria/settings.json"
     fi
     
     # 检查防火墙
     if command -v ufw &> /dev/null; then
-        echo "配置防火墙规则..."
-    ufw allow 4001/tcp
-    ufw allow 4001/udp
-    ufw allow 1337/tcp
-    ufw allow 11434/tcp
+        display_status "配置防火墙规则..." "info"
+        echo "✅ 正在添加以下防火墙规则:"
+        ufw allow 4001/tcp
+        echo "   - 允许TCP端口4001 (P2P通信)"
+        ufw allow 4001/udp
+        echo "   - 允许UDP端口4001 (P2P通信)"
+        ufw allow 1337/tcp
+        echo "   - 允许TCP端口1337 (API服务)"
+        ufw allow 11434/tcp 
+        echo "   - 允许TCP端口11434 (Ollama模型服务)"
+        
+        echo "✅ 当前端口规则状态:"
+        ufw status | grep -E "4001|1337|11434"
     fi
     
     # 启动节点
-    echo "启动Dria节点..."
+    display_status "启动Dria节点..." "info"
     export DKN_LOG=debug
     dkn-compute-launcher start
 }
@@ -1680,12 +1727,203 @@ check_network() {
         fi
     fi
     
+    # 诊断总结之前添加防火墙和端口转发检查
+    echo -e "\n${BOLD}${INFO_COLOR}【6/6】防火墙和端口转发检查:${NORMAL}"
+    echo "【6/6】防火墙和端口转发检查:" >> "$LOG_FILE"
+    
+    # 检查防火墙状态
+    echo -e "\n检查防火墙状态:" | tee -a "$LOG_FILE"
+    if command -v ufw &>/dev/null; then
+        echo "UFW防火墙状态:" | tee -a "$LOG_FILE"
+        ufw status | tee -a "$LOG_FILE"
+        
+        # 检查是否开放了必要端口
+        if ufw status | grep -q "4001/tcp"; then
+            echo "✅ 端口4001/tcp已在UFW中开放" | tee -a "$LOG_FILE"
+        else
+            echo "❌ 端口4001/tcp未在UFW中开放" | tee -a "$LOG_FILE"
+        fi
+        
+        if ufw status | grep -q "4001/udp"; then
+            echo "✅ 端口4001/udp已在UFW中开放" | tee -a "$LOG_FILE"
+        else
+            echo "❌ 端口4001/udp未在UFW中开放" | tee -a "$LOG_FILE"
+        fi
+        
+        if ufw status | grep -q "1337/tcp"; then
+            echo "✅ 端口1337/tcp已在UFW中开放" | tee -a "$LOG_FILE"
+        else
+            echo "❌ 端口1337/tcp未在UFW中开放" | tee -a "$LOG_FILE"
+        fi
+        
+        if ufw status | grep -q "11434/tcp"; then
+            echo "✅ 端口11434/tcp已在UFW中开放" | tee -a "$LOG_FILE"
+        else
+            echo "❌ 端口11434/tcp未在UFW中开放" | tee -a "$LOG_FILE"
+        fi
+    elif command -v iptables &>/dev/null; then
+        echo "iptables防火墙规则:" | tee -a "$LOG_FILE"
+        iptables -L -n | grep -E "4001|1337|11434" | tee -a "$LOG_FILE" || echo "未找到相关端口规则" | tee -a "$LOG_FILE"
+    else
+        echo "未检测到支持的防火墙工具(ufw/iptables)" | tee -a "$LOG_FILE"
+    fi
+    
+    # 检查端口是否可访问
+    echo -e "\n检查端口可访问性:" | tee -a "$LOG_FILE"
+    if ! command -v nc &>/dev/null; then
+        echo "正在安装netcat进行端口测试..." | tee -a "$LOG_FILE"
+        apt-get update -y >/dev/null 2>&1
+        apt-get install -y netcat-openbsd >/dev/null 2>&1 || apt-get install -y netcat >/dev/null 2>&1
+    fi
+    
+    if command -v nc &>/dev/null; then
+        # 获取本机IP
+        LOCAL_IP=$(hostname -I | awk '{print $1}')
+        if [ -z "$LOCAL_IP" ]; then
+            LOCAL_IP="127.0.0.1"
+        fi
+        
+        # 测试本地端口
+        echo "测试本地端口:" | tee -a "$LOG_FILE"
+        if nc -z -v -w2 $LOCAL_IP 4001 2>/dev/null; then
+            echo "✅ 本地端口4001可访问" | tee -a "$LOG_FILE"
+        else
+            echo "❌ 本地端口4001不可访问" | tee -a "$LOG_FILE"
+        fi
+        
+        if nc -z -v -w2 $LOCAL_IP 1337 2>/dev/null; then
+            echo "✅ 本地端口1337可访问" | tee -a "$LOG_FILE"
+        else
+            echo "❌ 本地端口1337不可访问" | tee -a "$LOG_FILE"
+        fi
+        
+        if nc -z -v -w2 $LOCAL_IP 11434 2>/dev/null; then
+            echo "✅ 本地端口11434可访问" | tee -a "$LOG_FILE"
+        else
+            echo "❌ 本地端口11434不可访问" | tee -a "$LOG_FILE"
+        fi
+    else
+        echo "无法安装netcat，跳过端口测试" | tee -a "$LOG_FILE"
+    fi
+    
+    # 检查端口转发状态 (仅限WSL环境)
+    if [ "$ENV_TYPE" = "wsl" ]; then
+        echo -e "\n检查Windows端口转发状态:" | tee -a "$LOG_FILE"
+        echo "尝试通过PowerShell获取端口转发规则..." | tee -a "$LOG_FILE"
+        
+        # 使用PowerShell查询端口转发规则
+        echo "执行PowerShell命令检查端口转发..." | tee -a "$LOG_FILE"
+        PORT_FORWARD_CHECK=$(powershell.exe -Command "netsh interface portproxy show all" 2>/dev/null)
+        
+        if [ $? -eq 0 ] && [ ! -z "$PORT_FORWARD_CHECK" ]; then
+            echo "$PORT_FORWARD_CHECK" | tee -a "$LOG_FILE"
+            
+            if echo "$PORT_FORWARD_CHECK" | grep -q "4001"; then
+                echo "✅ 端口4001的转发规则已存在" | tee -a "$LOG_FILE"
+            else
+                echo "❌ 未找到端口4001的转发规则" | tee -a "$LOG_FILE"
+            fi
+            
+            if echo "$PORT_FORWARD_CHECK" | grep -q "1337"; then
+                echo "✅ 端口1337的转发规则已存在" | tee -a "$LOG_FILE"
+            else
+                echo "❌ 未找到端口1337的转发规则" | tee -a "$LOG_FILE"
+            fi
+            
+            if echo "$PORT_FORWARD_CHECK" | grep -q "11434"; then
+                echo "✅ 端口11434的转发规则已存在" | tee -a "$LOG_FILE"
+            else
+                echo "❌ 未找到端口11434的转发规则" | tee -a "$LOG_FILE"
+            fi
+        else
+            echo "无法获取Windows端口转发规则" | tee -a "$LOG_FILE"
+            echo "请在Windows PowerShell(管理员)中手动执行: netsh interface portproxy show all" | tee -a "$LOG_FILE"
+        fi
+        
+        # 检查Windows防火墙规则
+        echo -e "\n检查Windows防火墙规则:" | tee -a "$LOG_FILE"
+        echo "执行PowerShell命令检查防火墙规则..." | tee -a "$LOG_FILE"
+        FIREWALL_CHECK=$(powershell.exe -Command "Get-NetFirewallRule -DisplayName 'Dria*' | Format-Table -Property DisplayName,Enabled,Direction,Action -AutoSize" 2>/dev/null)
+        
+        if [ $? -eq 0 ] && [ ! -z "$FIREWALL_CHECK" ]; then
+            echo "$FIREWALL_CHECK" | tee -a "$LOG_FILE"
+        else
+            echo "无法获取Windows防火墙规则" | tee -a "$LOG_FILE"
+            echo "请在Windows PowerShell(管理员)中手动执行: Get-NetFirewallRule -DisplayName 'Dria*'" | tee -a "$LOG_FILE"
+        fi
+        
+        # 提供端口转发配置脚本
+        echo -e "\n${BOLD}${INFO_COLOR}端口转发配置脚本:${NORMAL}" | tee -a "$LOG_FILE"
+        echo "如需配置端口转发，请复制以下PowerShell脚本到Windows中执行:" | tee -a "$LOG_FILE"
+        echo "----- 开始复制以下内容 -----" | tee -a "$LOG_FILE"
+        echo "# 以管理员身份运行此脚本" | tee -a "$LOG_FILE"
+        echo "if (-NOT ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole] \"Administrator\")) {" | tee -a "$LOG_FILE"
+        echo "    Write-Warning \"请以管理员身份运行此脚本！\"" | tee -a "$LOG_FILE"
+        echo "    exit" | tee -a "$LOG_FILE"
+        echo "}" | tee -a "$LOG_FILE"
+        echo "" | tee -a "$LOG_FILE"
+        echo "# 获取WSL IP地址" | tee -a "$LOG_FILE"
+        echo "\$wslIp = wsl hostname -I | ForEach-Object { \$_.Trim() }" | tee -a "$LOG_FILE"
+        echo "Write-Host \"WSL IP: \$wslIp\"" | tee -a "$LOG_FILE"
+        echo "" | tee -a "$LOG_FILE"
+        echo "# 移除现有端口转发规则" | tee -a "$LOG_FILE"
+        echo "netsh interface portproxy reset" | tee -a "$LOG_FILE"
+        echo "" | tee -a "$LOG_FILE"
+        echo "# 添加新的端口转发规则" | tee -a "$LOG_FILE"
+        echo "netsh interface portproxy add v4tov4 listenport=4001 listenaddress=0.0.0.0 connectport=4001 connectaddress=\$wslIp" | tee -a "$LOG_FILE"
+        echo "netsh interface portproxy add v4tov4 listenport=1337 listenaddress=0.0.0.0 connectport=1337 connectaddress=\$wslIp" | tee -a "$LOG_FILE"
+        echo "netsh interface portproxy add v4tov4 listenport=11434 listenaddress=0.0.0.0 connectport=11434 connectaddress=\$wslIp" | tee -a "$LOG_FILE"
+        echo "" | tee -a "$LOG_FILE"
+        echo "# 添加防火墙规则（如果不存在）" | tee -a "$LOG_FILE"
+        echo "if (-Not (Get-NetFirewallRule -DisplayName \"Dria-TCP-4001\" -ErrorAction SilentlyContinue)) {" | tee -a "$LOG_FILE"
+        echo "    New-NetFirewallRule -DisplayName \"Dria-TCP-4001\" -Direction Inbound -Protocol TCP -LocalPort 4001 -Action Allow" | tee -a "$LOG_FILE"
+        echo "}" | tee -a "$LOG_FILE"
+        echo "if (-Not (Get-NetFirewallRule -DisplayName \"Dria-UDP-4001\" -ErrorAction SilentlyContinue)) {" | tee -a "$LOG_FILE"
+        echo "    New-NetFirewallRule -DisplayName \"Dria-UDP-4001\" -Direction Inbound -Protocol UDP -LocalPort 4001 -Action Allow" | tee -a "$LOG_FILE"
+        echo "}" | tee -a "$LOG_FILE"
+        echo "if (-Not (Get-NetFirewallRule -DisplayName \"Dria-TCP-1337\" -ErrorAction SilentlyContinue)) {" | tee -a "$LOG_FILE"
+        echo "    New-NetFirewallRule -DisplayName \"Dria-TCP-1337\" -Direction Inbound -Protocol TCP -LocalPort 1337 -Action Allow" | tee -a "$LOG_FILE"
+        echo "}" | tee -a "$LOG_FILE"
+        echo "if (-Not (Get-NetFirewallRule -DisplayName \"Dria-TCP-11434\" -ErrorAction SilentlyContinue)) {" | tee -a "$LOG_FILE"
+        echo "    New-NetFirewallRule -DisplayName \"Dria-TCP-11434\" -Direction Inbound -Protocol TCP -LocalPort 11434 -Action Allow" | tee -a "$LOG_FILE"
+        echo "}" | tee -a "$LOG_FILE"
+        echo "" | tee -a "$LOG_FILE"
+        echo "# 显示端口转发规则" | tee -a "$LOG_FILE"
+        echo "Write-Host \"当前端口转发规则:\"" | tee -a "$LOG_FILE"
+        echo "netsh interface portproxy show all" | tee -a "$LOG_FILE"
+        echo "" | tee -a "$LOG_FILE"
+        echo "Write-Host \"防火墙规则已添加，端口转发已配置。\"" | tee -a "$LOG_FILE"
+        echo "----- 复制结束 -----" | tee -a "$LOG_FILE"
+    fi
+    
     # 诊断总结
     echo -e "\n${BOLD}${INFO_COLOR}网络诊断总结:${NORMAL}" | tee -a "$LOG_FILE"
     echo "1. 基本网络连接: $(if ping -c 1 -W 2 8.8.8.8 &>/dev/null; then echo "正常"; else echo "异常"; fi)" | tee -a "$LOG_FILE"
     echo "2. DNS服务器可访问性: $(if ping -c 1 -W 2 $(grep nameserver /etc/resolv.conf | head -1 | awk '{print $2}') &>/dev/null; then echo "正常"; else echo "异常"; fi)" | tee -a "$LOG_FILE"
     echo "3. DNS解析: $(if host github.com &>/dev/null; then echo "正常"; else echo "异常"; fi)" | tee -a "$LOG_FILE"
     echo "4. GitHub访问: $(if curl -s --connect-timeout 3 https://api.github.com &>/dev/null; then echo "正常"; else echo "异常"; fi)" | tee -a "$LOG_FILE"
+    
+    # 添加防火墙和端口状态检查到总结
+    if command -v nc &>/dev/null; then
+        LOCAL_IP=$(hostname -I | awk '{print $1}')
+        if [ -z "$LOCAL_IP" ]; then
+            LOCAL_IP="127.0.0.1"
+        fi
+        echo "5. 必要端口状态:" | tee -a "$LOG_FILE"
+        echo "   - 端口4001: $(if nc -z -v -w2 $LOCAL_IP 4001 2>/dev/null; then echo "可访问"; else echo "不可访问"; fi)" | tee -a "$LOG_FILE"
+        echo "   - 端口1337: $(if nc -z -v -w2 $LOCAL_IP 1337 2>/dev/null; then echo "可访问"; else echo "不可访问"; fi)" | tee -a "$LOG_FILE"
+        echo "   - 端口11434: $(if nc -z -v -w2 $LOCAL_IP 11434 2>/dev/null; then echo "可访问"; else echo "不可访问"; fi)" | tee -a "$LOG_FILE"
+    fi
+    
+    if [ "$ENV_TYPE" = "wsl" ]; then
+        PORT_FORWARD_CHECK=$(powershell.exe -Command "netsh interface portproxy show all" 2>/dev/null)
+        if [ $? -eq 0 ] && [ ! -z "$PORT_FORWARD_CHECK" ]; then
+            echo "6. Windows端口转发状态:" | tee -a "$LOG_FILE"
+            echo "   - 端口4001转发: $(if echo "$PORT_FORWARD_CHECK" | grep -q "4001"; then echo "已配置"; else echo "未配置"; fi)" | tee -a "$LOG_FILE"
+            echo "   - 端口1337转发: $(if echo "$PORT_FORWARD_CHECK" | grep -q "1337"; then echo "已配置"; else echo "未配置"; fi)" | tee -a "$LOG_FILE"
+            echo "   - 端口11434转发: $(if echo "$PORT_FORWARD_CHECK" | grep -q "11434"; then echo "已配置"; else echo "未配置"; fi)" | tee -a "$LOG_FILE"
+        fi
+    fi
     
     # 建议措施
     echo -e "\n${BOLD}${INFO_COLOR}建议措施:${NORMAL}" | tee -a "$LOG_FILE"
@@ -1695,6 +1933,20 @@ check_network() {
     
     if ! curl -s --connect-timeout 3 https://api.github.com &>/dev/null; then
         echo "- GitHub访问问题: 请使用选项8设置网络代理" | tee -a "$LOG_FILE"
+    fi
+    
+    # 添加端口和防火墙建议
+    if command -v nc &>/dev/null; then
+        if ! nc -z -v -w2 $LOCAL_IP 4001 2>/dev/null || ! nc -z -v -w2 $LOCAL_IP 1337 2>/dev/null || ! nc -z -v -w2 $LOCAL_IP 11434 2>/dev/null; then
+            echo "- 端口问题: 请检查防火墙设置，确保端口4001、1337和11434已开放" | tee -a "$LOG_FILE"
+        fi
+    fi
+    
+    if [ "$ENV_TYPE" = "wsl" ]; then
+        PORT_FORWARD_CHECK=$(powershell.exe -Command "netsh interface portproxy show all" 2>/dev/null)
+        if [ $? -eq 0 ] && (! echo "$PORT_FORWARD_CHECK" | grep -q "4001" || ! echo "$PORT_FORWARD_CHECK" | grep -q "1337" || ! echo "$PORT_FORWARD_CHECK" | grep -q "11434"); then
+            echo "- 端口转发问题: 请在Windows中配置端口转发，参考上方的PowerShell脚本" | tee -a "$LOG_FILE"
+        fi
     fi
     
     echo -e "\n${BOLD}${INFO_COLOR}完整诊断日志保存在: $LOG_FILE${NORMAL}"
