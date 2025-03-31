@@ -685,7 +685,7 @@ create_superfix_tool() {
     fi
     
     # 修复DNS
-    echo "修复DNS配置..."
+    echo "修复DNS配置..." "info"
     if [ "$ENV_TYPE" = "wsl" ]; then
         # WSL环境使用Windows主机作为DNS
         WIN_HOST_IP=$(ip route | grep default | awk '{print $3}')
@@ -722,7 +722,7 @@ HOSTS
     # 根据环境创建不同的网络配置
     if [ "$ENV_TYPE" = "wsl" ]; then
         # WSL环境配置
-        cat > /root/.dria/settings.json << EOL
+        cat > /root/.dria/settings.json << WSLSETTINGSEOF
 {
     "network": {
         "connection_timeout": 300,
@@ -745,10 +745,10 @@ HOSTS
         ]
     }
 }
-EOL
+WSLSETTINGSEOF
     else
         # 原生Linux环境配置
-        cat > /root/.dria/settings.json << EOL
+        cat > /root/.dria/settings.json << LINUXSETTINGSEOF
 {
     "network": {
         "connection_timeout": 300,
@@ -771,7 +771,7 @@ EOL
         ]
     }
 }
-EOL
+LINUXSETTINGSEOF
     fi
     
     # 检查防火墙
@@ -815,21 +815,21 @@ fix_wsl_network() {
     
     # 修复DNS配置
     display_status "修复DNS配置..." "info"
-    cat > /etc/resolv.conf << EOF
+    cat > /etc/resolv.conf << DNSEOF
 nameserver 8.8.8.8
 nameserver 1.1.1.1
-EOF
+DNSEOF
     
     # 配置hosts映射
     display_status "配置hosts映射..." "info"
     if ! grep -q "node1.dria.co" /etc/hosts; then
-        cat >> /etc/hosts << EOF
+        cat >> /etc/hosts << HOSTSEOF
 34.145.16.76 node1.dria.co
 34.42.109.93 node2.dria.co
 34.42.43.172 node3.dria.co
 35.200.247.78 node4.dria.co
 34.92.171.75 node5.dria.co
-EOF
+HOSTSEOF
     fi
     
     # 检查和配置防火墙
@@ -867,7 +867,7 @@ EOF
     # 创建优化的网络配置
     display_status "创建优化的网络配置..." "info"
     mkdir -p /root/.dria
-    cat > /root/.dria/settings.json << EOF
+    cat > /root/.dria/settings.json << 'SETTINGSEOF'
 {
     "network": {
         "enable_relay": true,
@@ -897,7 +897,7 @@ EOF
         ]
     }
 }
-EOF
+SETTINGSEOF
     
     # 设置启动器配置
     display_status "配置dkn-compute-launcher..." "info"
@@ -905,7 +905,7 @@ EOF
     
     # 创建Windows端口转发脚本
     display_status "创建Windows端口转发脚本..." "info"
-    cat > /root/.dria/wsl_port_forward.ps1 << EOF
+    cat > /root/.dria/wsl_port_forward.ps1 << PSEOF
 # 以管理员身份运行此脚本
 if (-NOT ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole] "Administrator")) {
     Write-Warning "请以管理员身份运行此脚本！"
@@ -943,7 +943,7 @@ Write-Host "当前端口转发规则:"
 netsh interface portproxy show all
 
 Write-Host "防火墙规则已添加，端口转发已配置。"
-EOF
+PSEOF
     
     # 提示用户在Windows中运行脚本
     display_status "端口转发脚本已创建: /root/.dria/wsl_port_forward.ps1" "success"
@@ -953,7 +953,7 @@ EOF
     
     # 创建优化启动器脚本
     display_status "创建优化启动器脚本..." "info"
-    cat > /usr/local/bin/dria-optimized << 'EOF'
+    cat > /usr/local/bin/dria-optimized << 'OPTIMIZEDEOF'
 #!/bin/bash
 
 # 颜色定义
@@ -1076,13 +1076,13 @@ fi
 display_status "正在启动Dria节点..." "info"
 export DKN_LOG=debug
 dkn-compute-launcher start
-EOF
+OPTIMIZEDEOF
     
     chmod +x /usr/local/bin/dria-optimized
     
     # 创建服务文件
     display_status "创建系统服务..." "info"
-    cat > /etc/systemd/system/dria-node.service << EOF
+    cat > /etc/systemd/system/dria-node.service << 'SERVICEEOF'
 [Unit]
 Description=Dria Compute Node
 After=network.target docker.service
@@ -1097,7 +1097,7 @@ RestartSec=10
 
 [Install]
 WantedBy=multi-user.target
-EOF
+SERVICEEOF
     
     systemctl daemon-reload
     systemctl enable dria-node.service
