@@ -1345,40 +1345,17 @@ manage_dria_node() {
         4) 
             # 检查是否已经配置了基本设置
             if ! dkn-compute-launcher settings get model &>/dev/null; then
-                display_status "检测到未配置基本设置，请先进行配置..." "warning"
-                echo "请选择要使用的模型："
-                echo "1. llama2"
-                echo "2. mistral"
-                echo "3. codellama"
-                read -p "请选择模型 (1-3): " model_choice
-                
-                case $model_choice in
-                    1) dkn-compute-launcher settings set model llama2 ;;
-                    2) dkn-compute-launcher settings set model mistral ;;
-                    3) dkn-compute-launcher settings set model codellama ;;
-                    *) 
-                        display_status "无效的选择，返回主菜单" "error"
-                        return 1
-                        ;;
-                esac
-                
-                # 设置其他基本参数
-                dkn-compute-launcher settings set docker.pull-policy IfNotPresent
-                dkn-compute-launcher settings set compute.threads 4
-                dkn-compute-launcher settings set compute.memory 8
-                
-                display_status "基本设置已完成" "success"
+                display_status "检测到未配置基本设置，请先进行配置" "warning"
+                # 直接进入设置界面
+                dkn-compute-launcher settings
+                return
             fi
             
-            # 现在处理推荐码
+            # 如果已经配置了基本设置，则继续处理推荐码
             display_status "正在配置推荐码管理环境..." "info"
-            # 创建必要的目录
             mkdir -p /root/.dria/dkn-compute-launcher
-            # 创建环境文件
             touch /root/.dria/dkn-compute-launcher/.env
-            # 设置基本权限
             chmod 600 /root/.dria/dkn-compute-launcher/.env
-            # 现在执行推荐码管理
             dkn-compute-launcher referrals
             ;;
         5) dkn-compute-launcher measure ;;
