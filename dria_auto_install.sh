@@ -831,13 +831,13 @@ EOL
 
 # 修复WSL网络配置
 fix_wsl_network() {
-    display_status "开始修复WSL网络配置..." "info"
-    
     # 检查是否在WSL环境中
-    if ! grep -qi "microsoft" /proc/version; then
-        display_status "当前不在WSL环境中，跳过WSL网络修复" "warning"
+    if ! grep -qi "microsoft" /proc/version && ! grep -qi "microsoft" /proc/sys/kernel/osrelease; then
+        display_status "此功能仅适用于WSL环境" "error"
         return 1
     fi
+    
+    display_status "正在进行WSL网络修复..." "info"
     
     # 停止现有服务
     display_status "停止现有服务..." "info"
@@ -846,11 +846,12 @@ fix_wsl_network() {
     
     # 获取Windows主机IP
     display_status "获取Windows主机IP..." "info"
-    WINDOWS_IP=$(ip route | grep default | awk '{print $3}')
-    if [ -z "$WINDOWS_IP" ]; then
-        display_status "无法获取Windows主机IP" "error"
-        return 1
+    WINDOWS_HOST_IP=$(ip route | grep default | awk '{print $3}')
+    if [ -z "$WINDOWS_HOST_IP" ]; then
+        display_status "无法获取Windows主机IP，使用默认IP 172.16.0.1" "warning"
+        WINDOWS_HOST_IP="172.16.0.1"
     fi
+    display_status "Windows主机IP: $WINDOWS_HOST_IP" "info"
     
     # 修复DNS配置
     display_status "修复DNS配置..." "info"
@@ -859,15 +860,17 @@ nameserver 8.8.8.8
 nameserver 1.1.1.1
 EOF
     
-    # 添加hosts映射
+    # 配置hosts映射
     display_status "配置hosts映射..." "info"
-    cat >> /etc/hosts << EOF
+    if ! grep -q "node1.dria.co" /etc/hosts; then
+        cat >> /etc/hosts << EOF
 34.145.16.76 node1.dria.co
 34.42.109.93 node2.dria.co
 34.42.43.172 node3.dria.co
 35.200.247.78 node4.dria.co
 34.92.171.75 node5.dria.co
 EOF
+    fi
     
     # 创建优化的网络配置
     display_status "创建优化的网络配置..." "info"
@@ -875,39 +878,92 @@ EOF
     cat > /root/.dria/settings.json << EOF
 {
     "network": {
-        "external_multiaddrs": [
-            "/ip4/0.0.0.0/tcp/4001",
-            "/ip4/0.0.0.0/udp/4001/quic"
-        ],
         "enable_relay": true,
         "relay_discovery": true,
-        "relay_connection_timeout": 60000,
+        "connection_timeout": 300,
         "direct_connection_timeout": 20000,
-        "connection_timeout": 300,
-        "mesh": {
-            "enable": true,
-            "min_peers": 2,
-            "max_peers": 10,
-            "connection_timeout": 300,
-            "ping_interval": 30,
-            "ping_timeout": 10
-        }
-    },
-    "node": {
-        "enable_direct_connect": true,
-        "direct_connect_timeout": 20000,
         "relay_connection_timeout": 60000,
-        "connection_timeout": 300,
-        "ping_interval": 30,
-        "ping_timeout": 10
+        "mesh": {
+            "high": 20,
+            "low": 5,
+            "target": 10
+        },
+        "bootstrap_nodes": [
+            "/ip4/34.145.16.76/tcp/4001/p2p/QmXZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
+            "/ip4/34.42.109.93/tcp/4001/p2p/QmYZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
+            "/ip4/34.42.43.172/tcp/4001/p2p/QmZZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
+            "/ip4/35.200.247.78/tcp/4001/p2p/QmWZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV",
+            "/ip4/34.92.171.75/tcp/4001/p2p/QmVZXGXXXNo1Xmgq2BxeSveaWfcytVD1Y9z5L2iSrHqGdV"
+        ],
+        "listen_addresses": [
+            "/ip4/0.0.0.0/tcp/4001",
+            "/ip4/0.0.0.0/udp/4001/quic-v1"
+        ],
+        "external_addresses": [
+            "/ip4/$WINDOWS_HOST_IP/tcp/4001",
+            "/ip4/$WINDOWS_HOST_IP/udp/4001/quic-v1"
+        ]
     }
 }
 EOF
     
+    # 创建Windows端口转发脚本
+    display_status "创建Windows端口转发脚本..." "info"
+    cat > /root/.dria/wsl_port_forward.ps1 << EOF
+# 以管理员身份运行此脚本
+if (-NOT ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole] "Administrator")) {
+    Write-Warning "请以管理员身份运行此脚本！"
+    exit
+}
+
+# 获取WSL IP地址
+\$wslIp = wsl hostname -I | ForEach-Object { \$_.Trim() }
+Write-Host "WSL IP: \$wslIp"
+
+# 移除现有端口转发规则
+netsh interface portproxy reset
+
+# 添加新的端口转发规则
+netsh interface portproxy add v4tov4 listenport=4001 listenaddress=0.0.0.0 connectport=4001 connectaddress=\$wslIp
+netsh interface portproxy add v4tov4 listenport=1337 listenaddress=0.0.0.0 connectport=1337 connectaddress=\$wslIp
+netsh interface portproxy add v4tov4 listenport=11434 listenaddress=0.0.0.0 connectport=11434 connectaddress=\$wslIp
+
+# 添加防火墙规则（如果不存在）
+if (-Not (Get-NetFirewallRule -DisplayName "Dria-TCP-4001" -ErrorAction SilentlyContinue)) {
+    New-NetFirewallRule -DisplayName "Dria-TCP-4001" -Direction Inbound -Protocol TCP -LocalPort 4001 -Action Allow
+}
+if (-Not (Get-NetFirewallRule -DisplayName "Dria-UDP-4001" -ErrorAction SilentlyContinue)) {
+    New-NetFirewallRule -DisplayName "Dria-UDP-4001" -Direction Inbound -Protocol UDP -LocalPort 4001 -Action Allow
+}
+if (-Not (Get-NetFirewallRule -DisplayName "Dria-TCP-1337" -ErrorAction SilentlyContinue)) {
+    New-NetFirewallRule -DisplayName "Dria-TCP-1337" -Direction Inbound -Protocol TCP -LocalPort 1337 -Action Allow
+}
+if (-Not (Get-NetFirewallRule -DisplayName "Dria-TCP-11434" -ErrorAction SilentlyContinue)) {
+    New-NetFirewallRule -DisplayName "Dria-TCP-11434" -Direction Inbound -Protocol TCP -LocalPort 11434 -Action Allow
+}
+
+# 显示端口转发规则
+Write-Host "当前端口转发规则:"
+netsh interface portproxy show all
+
+Write-Host "防火墙规则已添加，端口转发已配置。"
+EOF
+    
+    # 提示用户在Windows中运行脚本
+    display_status "端口转发脚本已创建: /root/.dria/wsl_port_forward.ps1" "success"
+    display_status "请在Windows中打开PowerShell(管理员)，执行以下命令设置端口转发：" "warning"
+    WSL_PATH=$(wslpath -w /root/.dria/wsl_port_forward.ps1)
+    echo "powershell.exe -ExecutionPolicy Bypass -File \"$WSL_PATH\""
+    
+    # 检查Docker网络
+    display_status "检查Docker网络..." "info"
+    if ! docker network inspect dria-network >/dev/null 2>&1; then
+        docker network create dria-network
+    fi
+    
     # 创建docker-compose.yml文件
     display_status "创建docker-compose.yml文件..." "info"
-    mkdir -p /root/.dria
-    cat > /root/.dria/docker-compose.yml << 'EOF'
+    cat > /root/.dria/docker-compose.yml << 'EOL'
 version: '3.8'
 
 services:
@@ -920,61 +976,45 @@ services:
       - /root/.dria:/root/.dria
     environment:
       - DKN_LOG=debug
-      - HTTP_PROXY=${HTTP_PROXY}
-      - HTTPS_PROXY=${HTTPS_PROXY}
-      - NO_PROXY=localhost,127.0.0.1
     ports:
       - "4001:4001"
       - "1337:1337"
       - "11434:11434"
     command: start
+    pull_policy: never
 
 networks:
   default:
     name: dria-network
     driver: bridge
-EOF
+EOL
     
-    # 确保文件权限正确
-    chmod 644 /root/.dria/docker-compose.yml
-    chown root:root /root/.dria/docker-compose.yml
-    
-    # 配置Docker代理
-    display_status "配置Docker代理..." "info"
-    mkdir -p /etc/systemd/system/docker.service.d
-    cat > /etc/systemd/system/docker.service.d/http-proxy.conf << EOF
-[Service]
-Environment="HTTP_PROXY=${http_proxy}"
-Environment="HTTPS_PROXY=${https_proxy}"
-Environment="NO_PROXY=localhost,127.0.0.1,host.docker.internal"
-EOF
-    
-    # 创建Docker客户端配置
-    mkdir -p /root/.docker
-    cat > /root/.docker/config.json << EOF
-{
-  "proxies": {
-    "default": {
-      "httpProxy": "${http_proxy}",
-      "httpsProxy": "${https_proxy}",
-      "noProxy": "localhost,127.0.0.1,host.docker.internal"
-    }
-  }
-}
-EOF
-    
-    # 重启Docker服务
-    display_status "重启Docker服务..." "info"
-    systemctl daemon-reload
-    systemctl restart docker
-    
-    # 等待Docker服务完全启动
-    sleep 5
-    
-    # 检查Docker网络
-    display_status "检查Docker网络..." "info"
-    if ! docker network inspect dria-network >/dev/null 2>&1; then
-        docker network create dria-network
+    # 检查本地镜像
+    if ! docker images | grep -q "dria/dkn-compute-launcher"; then
+        display_status "本地不存在Dria镜像，查找可用的替代镜像..." "warning"
+        
+        # 查找可能的替代镜像
+        ALT_IMAGE=$(docker images | grep -i "dria\|dkn" | head -n 1 | awk '{print $1":"$2}')
+        
+        if [ -n "$ALT_IMAGE" ]; then
+            display_status "找到替代镜像: $ALT_IMAGE，将使用该镜像" "info"
+            # 替换docker-compose.yml中的镜像
+            sed -i "s|image: dria/dkn-compute-launcher:latest|image: $ALT_IMAGE|g" /root/.dria/docker-compose.yml
+        else
+            display_status "未找到任何可用的Dria相关镜像，将尝试列出所有本地镜像" "warning"
+            echo "可用的本地镜像:"
+            docker images
+            
+            # 询问用户是否要使用本地某个镜像
+            read -p "请输入要使用的本地镜像名称（格式：name:tag，直接回车使用默认）: " USER_IMAGE
+            
+            if [ -n "$USER_IMAGE" ]; then
+                display_status "将使用镜像: $USER_IMAGE" "info"
+                sed -i "s|image: dria/dkn-compute-launcher:latest|image: $USER_IMAGE|g" /root/.dria/docker-compose.yml
+            else
+                display_status "未指定替代镜像，将尝试使用默认镜像" "warning"
+            fi
+        fi
     fi
     
     # 尝试启动节点
@@ -982,385 +1022,19 @@ EOF
     if docker-compose -f /root/.dria/docker-compose.yml up -d; then
         display_status "节点启动成功" "success"
         echo "请检查节点状态："
-        docker-compose -f /root/.dria/docker-compose.yml logs -f
+        docker-compose -f /root/.dria/docker-compose.yml logs | head -n 20
+        display_status "使用以下命令查看完整日志：docker-compose -f /root/.dria/docker-compose.yml logs -f" "info"
+        
+        # 提示用户检查Windows端口转发
+        display_status "重要: 请确保您已在Windows中执行端口转发脚本！" "warning"
+        WSL_PATH=$(wslpath -w /root/.dria/wsl_port_forward.ps1)
+        echo "powershell.exe -ExecutionPolicy Bypass -File \"$WSL_PATH\""
     else
         display_status "节点启动失败" "error"
         return 1
     fi
     
     display_status "WSL网络修复完成" "success"
-    echo "请确保在Windows PowerShell中执行以下命令："
-    echo "powershell -ExecutionPolicy Bypass -File /root/.dria/wsl_port_forward.ps1"
-}
-
-# 修改 configure_wsl_network 函数，增加DNS修复和直接连接工具
-configure_wsl_network() {
-    display_status "WSL网络优化工具" "info"
-    echo "此功能将配置Windows主机上的端口转发，使外部网络能够访问WSL中的Dria节点。"
-    echo ""
-    
-    # 检查是否在WSL环境中
-    if [ "$ENV_TYPE" != "wsl" ]; then
-        display_status "此功能只能在WSL环境中使用" "error"
-        return 1
-    fi
-    
-    # 先测试DNS解析
-    if ! ping -c 1 -W 2 node1.dria.co &>/dev/null; then
-        display_status "检测到DNS解析问题" "warning"
-        fix_wsl_dns
-    fi
-    
-    # 获取WSL的IP地址
-    WSL_IP=$(hostname -I | awk '{print $1}')
-    if [ -z "$WSL_IP" ]; then
-        display_status "无法获取WSL IP地址" "error"
-        return 1
-    fi
-    
-    display_status "WSL IP地址: $WSL_IP" "info"
-    
-    # 获取Windows主机IP
-    WIN_HOST_IP=$(ip route | grep default | awk '{print $3}')
-    if [ -z "$WIN_HOST_IP" ]; then
-        display_status "无法获取Windows主机IP地址" "error"
-        return 1
-    fi
-    
-    display_status "Windows主机IP: $WIN_HOST_IP" "info"
-    echo "$WIN_HOST_IP" > /tmp/win_host_ip
-    
-    # 创建临时PowerShell脚本
-    TEMP_PS1="/tmp/wsl_network_setup_$(date +%s).ps1"
-    
-    cat > "$TEMP_PS1" << EOF
-# 设置端口转发
-\$wslIP = "$WSL_IP"
-Write-Host "配置端口转发: 外部 -> \$wslIP"
-
-# 检查并删除已有的端口转发
-Write-Host "正在检查并清除现有端口转发..."
-netsh interface portproxy show v4tov4 | ForEach-Object {
-    if (\$_ -match "4001|1337|11434") {
-        \$parts = \$_ -split "\s+"
-        if (\$parts.Count -ge 3) {
-            \$listenPort = \$parts[1]
-            netsh interface portproxy delete v4tov4 listenport=\$listenPort listenaddress=0.0.0.0
-        }
-    }
-}
-
-# 添加新的端口转发
-Write-Host "添加新的端口转发规则..."
-netsh interface portproxy add v4tov4 listenport=4001 listenaddress=0.0.0.0 connectport=4001 connectaddress=\$wslIP
-netsh interface portproxy add v4tov4 listenport=1337 listenaddress=0.0.0.0 connectport=1337 connectaddress=\$wslIP
-netsh interface portproxy add v4tov4 listenport=11434 listenaddress=0.0.0.0 connectport=11434 connectaddress=\$wslIP
-
-# 添加Windows防火墙规则
-Write-Host "添加Windows防火墙规则..."
-New-NetFirewallRule -DisplayName "WSL-Dria-4001-TCP" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 4001 -ErrorAction SilentlyContinue
-New-NetFirewallRule -DisplayName "WSL-Dria-4001-UDP" -Direction Inbound -Action Allow -Protocol UDP -LocalPort 4001 -ErrorAction SilentlyContinue
-New-NetFirewallRule -DisplayName "WSL-Dria-1337-TCP" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 1337 -ErrorAction SilentlyContinue
-New-NetFirewallRule -DisplayName "WSL-Dria-11434-TCP" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 11434 -ErrorAction SilentlyContinue
-
-# 显示端口转发配置
-Write-Host "当前端口转发配置:"
-netsh interface portproxy show v4tov4
-EOF
-    
-    display_status "创建PowerShell脚本: $TEMP_PS1" "success"
-    
-    # 尝试自动执行PowerShell脚本
-    display_status "尝试使用Windows命令..." "info"
-    
-    # 创建提升权限的批处理文件
-    TEMP_BAT="/tmp/run_as_admin_$(date +%s).bat"
-    cat > "$TEMP_BAT" << EOF
-@echo off
-powershell -Command "Start-Process PowerShell -ArgumentList '-ExecutionPolicy Bypass -File \"$TEMP_PS1\"' -Verb RunAs"
-EOF
-    
-    # 转换为Windows路径
-    WIN_PS1_PATH=$(wslpath -w "$TEMP_PS1" 2>/dev/null)
-    WIN_BAT_PATH=$(wslpath -w "$TEMP_BAT" 2>/dev/null)
-    
-    # 尝试使用cmd.exe运行批处理文件
-    if command -v cmd.exe &>/dev/null; then
-        display_status "使用cmd.exe执行脚本..." "info"
-        echo "注意: 如果出现UAC提示，请点击'是'授予管理员权限"
-        cmd.exe /c "$WIN_BAT_PATH" 2>/dev/null
-        
-        if [ $? -eq 0 ]; then
-            display_status "已请求以管理员身份运行PowerShell脚本" "info"
-            echo "如果您在Windows中看到了UAC提示，请确认以允许脚本运行。"
-            echo "请等待PowerShell窗口完成配置后关闭。"
-        else
-            display_status "无法自动执行Windows命令，需要手动配置" "warning"
-            manual_windows_setup=true
-        fi
-    else
-        display_status "在此WSL环境中无法使用Windows命令，需要手动配置" "warning"
-        manual_windows_setup=true
-    fi
-    
-    # 如果无法自动执行，提供手动步骤
-    if [ "$manual_windows_setup" = true ]; then
-        display_status "请手动在Windows中执行以下步骤:" "info"
-        echo "1. 复制以下PowerShell脚本内容"
-        echo "2. 在Windows中打开PowerShell(以管理员身份运行)"
-        echo "3. 粘贴并执行脚本内容"
-        echo "4. 完成后回到此WSL窗口继续操作"
-        echo ""
-        echo "----------复制以下内容----------"
-        # 为手动复制创建更简单的脚本内容
-        echo "# WSL IP地址: $WSL_IP"
-        echo "# 复制以下全部内容到管理员PowerShell"
-        echo '$wslIP = "'$WSL_IP'"'
-        echo 'Write-Host "配置端口转发: 外部 -> $wslIP"'
-        echo 'netsh interface portproxy delete v4tov4 listenport=4001 listenaddress=0.0.0.0 2>$null'
-        echo 'netsh interface portproxy delete v4tov4 listenport=1337 listenaddress=0.0.0.0 2>$null'
-        echo 'netsh interface portproxy delete v4tov4 listenport=11434 listenaddress=0.0.0.0 2>$null'
-        echo 'netsh interface portproxy add v4tov4 listenport=4001 listenaddress=0.0.0.0 connectport=4001 connectaddress=$wslIP'
-        echo 'netsh interface portproxy add v4tov4 listenport=1337 listenaddress=0.0.0.0 connectport=1337 connectaddress=$wslIP'
-        echo 'netsh interface portproxy add v4tov4 listenport=11434 listenaddress=0.0.0.0 connectport=11434 connectaddress=$wslIP'
-        echo 'New-NetFirewallRule -DisplayName "WSL-Dria-4001-TCP" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 4001 -ErrorAction SilentlyContinue'
-        echo 'New-NetFirewallRule -DisplayName "WSL-Dria-4001-UDP" -Direction Inbound -Action Allow -Protocol UDP -LocalPort 4001 -ErrorAction SilentlyContinue'
-        echo 'New-NetFirewallRule -DisplayName "WSL-Dria-1337-TCP" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 1337 -ErrorAction SilentlyContinue'
-        echo 'New-NetFirewallRule -DisplayName "WSL-Dria-11434-TCP" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 11434 -ErrorAction SilentlyContinue'
-        echo 'netsh interface portproxy show v4tov4'
-        echo "----------复制以上内容----------"
-        echo ""
-        
-        read -p "按回车键继续，确认您已在Windows中执行上述脚本... " continue_setup
-    fi
-    
-    # 配置防火墙和服务
-    display_status "配置WSL内部防火墙和服务..." "info"
-    
-    # 检查并安装防火墙
-    if ! command -v ufw &>/dev/null; then
-        apt update
-        apt install -y ufw
-    fi
-    
-    # 配置防火墙规则
-    ufw allow 4001/tcp
-    ufw allow 4001/udp
-    ufw allow 1337/tcp
-    ufw allow 11434/tcp
-    
-    # 如果防火墙未启用，提示用户
-    if ! ufw status | grep -q "Status: active"; then
-        display_status "防火墙未启用，建议启用: sudo ufw enable" "warning"
-    fi
-    
-    # 配置Dria网络
-    mkdir -p "$HOME/.dria" 2>/dev/null
-    
-    # 创建优化的网络配置，使用IP地址替代DNS
-    cat > "$HOME/.dria/network_config.json" << EOF
-{
-  "libp2p": {
-    "listen_addresses": [
-      "/ip4/0.0.0.0/tcp/4001",
-      "/ip4/0.0.0.0/udp/4001/quic-v1"
-    ],
-    "external_addresses": [],
-    "bootstrap_peers": [
-      "/ip4/34.145.16.76/tcp/4001/p2p/16Uiu2HAmCj9DuTQgzepxfKP1byDZoQbfkh4ZoQGihHEL1fuof3FJ",
-      "/ip4/34.42.109.93/tcp/4001/p2p/16Uiu2HAm9fQCDYwmkDCNtb5XZC5p8dUcHpvN9JMPeA9wJMndRPMw",
-      "/ip4/34.42.43.172/tcp/4001/p2p/16Uiu2HAmVg8DxJ2MwAwQwA6Fj8fgbYBRqsTu3KAaWhq7Z7eMAKBL",
-      "/ip4/35.200.247.78/tcp/4001/p2p/16Uiu2HAmAkVoCpUHyZaXSddzByWMvYyR7ekCDJsM19mYHfMebYQQ",
-      "/ip4/34.92.171.75/tcp/4001/p2p/16Uiu2HAm1xBHVUCGjyiz8iakVoDR1qjj3bJT2ZYbPLyVTHX1pxKF"
-    ],
-    "connection_idle_timeout": 300,
-    "enable_relay": true,
-    "relay_discovery": true,
-    "direct_connection_timeout_ms": 20000,
-    "relay_connection_timeout_ms": 60000,
-    "external_multiaddrs": [
-      "/ip4/$WSL_IP/tcp/4001",
-      "/ip4/$WSL_IP/udp/4001/quic-v1"
-    ]
-  }
-}
-EOF
-    
-    display_status "已创建优化的网络配置文件: $HOME/.dria/network_config.json" "success"
-    
-    # 创建优化的启动脚本，增加DNS自动修复
-    cat > "$HOME/.dria/start_with_optimized_network.sh" << 'EOF'
-#!/bin/bash
-
-# 修复DNS问题
-if ! ping -c 1 -W 2 node1.dria.co &>/dev/null; then
-    echo "检测到DNS问题，正在修复..."
-    echo "nameserver 8.8.8.8" > /etc/resolv.conf
-    echo "nameserver 1.1.1.1" >> /etc/resolv.conf
-    
-    # 确保hosts文件中包含节点IP映射
-    if ! grep -q "node1.dria.co" /etc/hosts; then
-        echo "添加节点IP映射到hosts文件..."
-        cat >> /etc/hosts << 'HOSTS'
-# Dria节点IP映射
-34.145.16.76 node1.dria.co
-34.42.109.93 node2.dria.co
-34.42.43.172 node3.dria.co
-35.200.247.78 node4.dria.co
-34.92.171.75 node5.dria.co
-HOSTS
-    fi
-fi
-
-# 配置WSL网络环境
-WIN_HOST_IP=$(cat /tmp/win_host_ip 2>/dev/null || ip route | grep default | awk '{print $3}')
-echo "Windows主机IP: $WIN_HOST_IP"
-
-# 检查网络连接
-echo "检查网络连接..."
-if ! ping -c 1 -W 3 8.8.8.8 &>/dev/null; then
-    echo "网络连接异常，尝试修复..."
-    # 重置DNS
-    echo "nameserver $WIN_HOST_IP" > /etc/resolv.conf
-    echo "nameserver 8.8.8.8" >> /etc/resolv.conf
-    echo "nameserver 1.1.1.1" >> /etc/resolv.conf
-fi
-
-# 显示IP地址信息
-echo "WSL IP信息:"
-ip -4 addr show
-echo ""
-
-# 清理Docker网络（可选，如有网络问题时使用）
-if [ "$1" == "--reset-docker" ]; then
-    echo "重置Docker网络..."
-    docker network prune -f
-    systemctl restart docker
-    sleep 2
-fi
-
-# 创建网络配置文件
-WSL_IP=$(hostname -I | awk '{print $1}')
-mkdir -p "$HOME/.dria" 2>/dev/null
-cat > "$HOME/.dria/optimized_network_config.json" << CONFIG
-{
-  "libp2p": {
-    "listen_addresses": [
-      "/ip4/0.0.0.0/tcp/4001",
-      "/ip4/0.0.0.0/udp/4001/quic-v1"
-    ],
-    "external_addresses": [],
-    "bootstrap_peers": [
-      "/ip4/34.145.16.76/tcp/4001/p2p/16Uiu2HAmCj9DuTQgzepxfKP1byDZoQbfkh4ZoQGihHEL1fuof3FJ",
-      "/ip4/34.42.109.93/tcp/4001/p2p/16Uiu2HAm9fQCDYwmkDCNtb5XZC5p8dUcHpvN9JMPeA9wJMndRPMw",
-      "/ip4/34.42.43.172/tcp/4001/p2p/16Uiu2HAmVg8DxJ2MwAwQwA6Fj8fgbYBRqsTu3KAaWhq7Z7eMAKBL",
-      "/ip4/35.200.247.78/tcp/4001/p2p/16Uiu2HAmAkVoCpUHyZaXSddzByWMvYyR7ekCDJsM19mYHfMebYQQ",
-      "/ip4/34.92.171.75/tcp/4001/p2p/16Uiu2HAm1xBHVUCGjyiz8iakVoDR1qjj3bJT2ZYbPLyVTHX1pxKF"
-    ],
-    "connection_idle_timeout": 300,
-    "enable_relay": true,
-    "relay_discovery": true,
-    "direct_connection_timeout_ms": 20000,
-    "relay_connection_timeout_ms": 60000,
-    "external_multiaddrs": [
-      "/ip4/$WSL_IP/tcp/4001",
-      "/ip4/$WSL_IP/udp/4001/quic-v1"
-    ]
-  }
-}
-CONFIG
-
-# 创建或更新settings.json以使用我们的配置
-CONFIG_PATH="$HOME/.dria/optimized_network_config.json"
-echo "{\"network-config\": \"$CONFIG_PATH\"}" > "$HOME/.dria/settings.json"
-
-# 使用优化配置启动Dria节点
-echo "使用优化配置启动Dria节点..."
-echo "使用参数: $@"
-export DKN_LOG=debug
-dkn-compute-launcher start
-EOF
-    
-    chmod +x "$HOME/.dria/start_with_optimized_network.sh"
-    
-    # 创建启动服务
-    cat > /etc/systemd/system/dria-node.service << EOF
-[Unit]
-Description=Dria Compute Node
-After=network.target docker.service
-Requires=docker.service
-
-[Service]
-Type=simple
-User=root
-ExecStart=$HOME/.dria/start_with_optimized_network.sh
-Restart=on-failure
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
-EOF
-    
-    # 启用系统服务
-    systemctl daemon-reload
-    systemctl enable dria-node.service
-    
-    # 添加快捷命令
-    if ! grep -q "dria-optimized" "$HOME/.bashrc"; then
-        echo "alias dria-optimized='$HOME/.dria/start_with_optimized_network.sh'" >> "$HOME/.bashrc"
-    fi
-    
-    # 创建一个自动重启脚本
-    cat > /usr/local/bin/dria-restart << 'EOF'
-#!/bin/bash
-echo "正在重启Dria节点服务..."
-systemctl restart dria-node.service && echo "Dria节点已重启"
-EOF
-    chmod +x /usr/local/bin/dria-restart
-    
-    # 创建重置脚本
-    cat > /usr/local/bin/dria-reset << 'EOF'
-#!/bin/bash
-echo "重置Dria节点网络..."
-systemctl stop dria-node
-docker network prune -f
-systemctl start dria-node
-echo "Dria节点网络已重置"
-EOF
-    chmod +x /usr/local/bin/dria-reset
-    
-    # 创建直接连接工具
-    create_direct_connect_tool
-    
-    display_status "WSL网络优化配置完成" "success"
-    echo ""
-    echo "您可以通过以下命令管理Dria节点:"
-    echo "1. 开始节点: systemctl start dria-node"
-    echo "2. 停止节点: systemctl stop dria-node"
-    echo "3. 重启节点: dria-restart"
-    echo "4. 检查状态: systemctl status dria-node"
-    echo "5. 重置网络: dria-reset"
-    echo "6. 手动启动: dria-optimized"
-    echo "7. 重置启动: dria-optimized --reset-docker"
-    echo "8. IP直连启动: dria-direct"
-    echo "9. 超级修复工具: dria-superfix"
-    echo ""
-    display_status "每次重启Windows或WSL后，请重新运行此功能以更新端口转发" "warning"
-    echo "Windows主机IP可能会在重启后发生变化" 
-    
-    # 检查当前节点状态，如果在运行，询问是否重启应用新配置
-    if systemctl is-active --quiet dria-node; then
-        display_status "检测到Dria节点当前正在运行" "info"
-        read -p "是否重启节点以应用新配置?(y/n): " restart_node
-        if [[ $restart_node == "y" || $restart_node == "Y" ]]; then
-            display_status "重启Dria节点..." "info"
-            systemctl restart dria-node
-            display_status "Dria节点已重启" "success"
-        fi
-    else
-        display_status "Dria节点当前未运行，您可以使用 'systemctl start dria-node' 启动" "info"
-    fi
-    
     return 0
 }
 
