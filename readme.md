@@ -437,3 +437,81 @@ journalctl -u dria-node -f  # 查看日志
 - [Ollama官方网站](https://ollama.com/)
 - [WSL官方文档](https://learn.microsoft.com/zh-cn/windows/wsl/)
 - [本脚本GitHub仓库](https://github.com/fishzone24/dria)
+
+## 防火墙配置
+
+脚本会自动配置以下防火墙规则：
+
+### 必需端口
+- TCP 4001：Dria 节点通信端口
+- UDP 4001：Dria 节点 P2P 通信端口
+- TCP 1337：Dria 节点 API 端口
+- TCP 11434：Ollama 服务端口
+
+### 自动配置内容
+1. 安装并配置 UFW 防火墙
+2. 配置 iptables 规则
+3. 自动检测并释放被占用的端口
+4. 测试端口可访问性
+
+### 云服务器额外配置
+如果您使用云服务器（如阿里云、腾讯云等），还需要在云服务商控制面板中手动开放以下端口：
+- TCP 4001
+- UDP 4001
+- TCP 1337
+- TCP 11434
+
+## 故障排除
+
+### 端口问题
+如果遇到端口未开放的问题，可以：
+
+1. 运行超级修复工具：
+```bash
+./dria_auto_install.sh
+# 选择选项 F
+```
+
+2. 检查端口状态：
+```bash
+sudo netstat -tulpn | grep -E '4001|1337|11434'
+sudo ufw status
+```
+
+3. 检查防火墙规则：
+```bash
+sudo iptables -L -n | grep -E '4001|1337|11434'
+```
+
+### 网络连接问题
+如果节点状态显示 "CONNECTING" 或无法接收 ping：
+
+1. 检查防火墙配置
+2. 确认云服务器安全组设置
+3. 检查网络连接：
+```bash
+ping 8.8.8.8
+ping google.com
+```
+
+## 更新日志
+
+### v1.0.0
+- 初始版本发布
+- 支持 WSL 和原生 Linux 环境
+- 自动安装和配置功能
+- 超级修复工具
+
+### v1.1.0
+- 增强防火墙配置功能
+- 自动检测和释放被占用端口
+- 改进端口测试功能
+- 优化网络诊断功能
+
+## 许可证
+
+MIT License
+
+## 贡献
+
+欢迎提交 Issue 和 Pull Request 来帮助改进这个项目。
